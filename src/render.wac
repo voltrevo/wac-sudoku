@@ -1,0 +1,351 @@
+// Render a set of killer sudoku as a printable HTML page.
+//
+//     wac run src/gen.wac -- 20 20260906 | wac run src/render.wac > puzzles.html
+//
+// Reads the same format the solver reads, so anything solvable can be printed, and the `# sol` lines
+// the generator emits become the answer key.
+//
+// Cage borders are the only interesting part of the drawing. A cage is a set of cells, not a
+// rectangle, so its outline is per-edge: each cell carries a dashed line on any side where the
+// neighbour belongs to a different cage, drawn inset so it sits inside the grid rules rather than on
+// top of them. That is four classes per cell and no geometry.
+
+import { Core, Cli } from "std/platform.wac";
+import { digits, isSpace, toInt, letterFor } from "./text.wac";
+
+i32 MAXP() { return 64; }
+
+/** Cell side and cage inset, in the SVG's own units. */
+i32 SS() { return 100; }
+i32 DD() { return 9; }
+
+/**
+ * Whether a cell's side is a cage boundary. Sides are 0 top, 1 right, 2 bottom, 3 left.
+ *
+ * The grid edge counts as a boundary, so a cage touching the rim is closed off rather than left open.
+ */
+bool bnd(i32[] g, i32 n, i32 idx, i32 side) {
+  i32 r = idx / n;
+  i32 c = idx % n;
+  if (side == 0) { if (r == 0) { return true; } return g[idx - n] != g[idx]; }
+  if (side == 1) { if (c == n - 1) { return true; } return g[idx + 1] != g[idx]; }
+  if (side == 2) { if (r == n - 1) { return true; } return g[idx + n] != g[idx]; }
+  if (c == 0) { return true; }
+  return g[idx - 1] != g[idx];
+}
+
+string num(i32 v) { return digits(v); }
+
+/** One puzzle, flattened: `n*n` cage ids, the totals, and the answer. */
+struct Puz {
+  i32 n;
+  i32 boxW;
+  i32 boxH;
+  i32[] cageOf;
+  i32[] sums;
+  i32 nCages;
+  i32[] sol;
+  bool hasSol;
+}
+
+export i32 main(Core core, Cli cli) {
+  u8[] src = cli.readStdin().wait();
+  if (src.len() == 0) { core.log("<!-- nothing on stdin -->"); return 2; }
+
+  Puz[] all = Puz[MAXP()](fill: Puz(0, 0, 0, i32[0](), i32[0](), 0, i32[0](), false));
+  i32 nPuz = 0;
+
+  i32 n = 0;
+  i32 bw = 0;
+  i32 bh = 0;
+  string[] mapRows = string[64](fill: "");
+  i32 nMap = 0;
+  i32[] sums = i32[128]();
+  i32 nSums = 0;
+  string[] solRows = string[64](fill: "");
+  i32 nSol = 0;
+  bool started = false;
+
+  i32 at = 0;
+  while (at <= src.len()) {
+    i32 eol = at;
+    while (eol < src.len()) {
+      if (src[eol] == 10) { eol = eol; break; }
+      eol = eol + 1;
+    }
+
+    string[] w = string[64](fill: "");
+    i32 nw = 0;
+    i32 i = at;
+    while (i < eol) {
+      while (i < eol) {
+        if (!isSpace(src[i])) { break; }
+        i = i + 1;
+      }
+      if (i >= eol) { continue; }
+      i32 s = i;
+      while (i < eol) {
+        if (isSpace(src[i])) { break; }
+        i = i + 1;
+      }
+      if (nw < 64) {
+        u8[] piece = u8[i - s]();
+        for (i32 k = 0; k < i - s; k++) { piece[k] = src[s + k]; }
+        w[nw] = string.fromBytes(piece);
+        nw = nw + 1;
+      }
+    }
+
+    bool flush = false;
+    if (nw > 0) {
+      string h = w[0];
+      if (h == "===") { flush = true; }
+      else if (h == "size") {
+        if (nw == 4) { n = toInt(w[1]); bw = toInt(w[2]); bh = toInt(w[3]); started = true; }
+      } else if (h == "map") {
+        if (nw == 2) { mapRows[nMap] = w[1]; nMap = nMap + 1; }
+      } else if (h == "sums") {
+        for (i32 k = 1; k < nw; k++) { sums[nSums] = toInt(w[k]); nSums = nSums + 1; }
+      } else if (h == "#") {
+        if (nw == 3) { if (w[1] == "sol") { solRows[nSol] = w[2]; nSol = nSol + 1; } }
+      }
+    }
+    if (at > src.len() - 1) { flush = true; }
+
+    if (flush) {
+      if (started) {
+        if (nMap == n) {
+          i32 cells = n * n;
+          i32[] cageOf = i32[cells]();
+          i32[] letterOf = i32[256]();
+          for (i32 k = 0; k < 256; k++) { letterOf[k] = 0 - 1; }
+          i32 seen = 0;
+          for (i32 r = 0; r < n; r++) {
+            u8[] rb = mapRows[r].toBytes();
+            for (i32 c = 0; c < n; c++) {
+              i32 ch = rb[c];
+              if (letterOf[ch] < 0) { letterOf[ch] = seen; seen = seen + 1; }
+              cageOf[r * n + c] = letterOf[ch];
+            }
+          }
+          i32[] ss = i32[seen]();
+          for (i32 k = 0; k < seen; k++) { ss[k] = sums[k]; }
+          i32[] sol = i32[cells]();
+          bool hasSol = nSol == n;
+          if (hasSol) {
+            for (i32 r = 0; r < n; r++) {
+              u8[] rb = solRows[r].toBytes();
+              for (i32 c = 0; c < n; c++) { sol[r * n + c] = rb[c] - '0'; }
+            }
+          }
+          if (nPuz < MAXP()) {
+            all[nPuz] = Puz(n, bw, bh, cageOf, ss, seen, sol, hasSol);
+            nPuz = nPuz + 1;
+          }
+        }
+      }
+      nMap = 0; nSums = 0; nSol = 0; started = false;
+    }
+
+    if (at > src.len() - 1) { at = src.len() + 1; } else { at = eol + 1; }
+  }
+
+  // ── the page ───────────────────────────────────────────────────────────────
+  core.log("<!doctype html>");
+  core.log("<html lang=\"en\"><head><meta charset=\"utf-8\">");
+  core.log("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+  core.log("<title>Killer Sudoku &mdash; " + digits(nPuz) + " puzzles</title>");
+  core.log("<style>");
+  core.log(":root{--ink:#101a2b;--rule:#ccd4e0;--thick:#33405a;--cage:#3b7ddd;");
+  core.log("  --paper:#fff;--bg:#eceff4;--muted:#71809a}");
+  core.log("*{box-sizing:border-box}");
+  core.log("body{margin:0;padding:40px 22px 64px;background:var(--bg);color:var(--ink);");
+  core.log("  font:16px/1.55 ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;");
+  core.log("  -webkit-font-smoothing:antialiased}");
+  core.log("header{max-width:1200px;margin:0 auto 30px}");
+  core.log("h1{margin:0 0 8px;font-size:28px;font-weight:680;letter-spacing:-.02em}");
+  core.log("p.sub{margin:0;color:var(--muted);font-size:14px;max-width:70ch}");
+  core.log(".sheet{max-width:1200px;margin:0 auto;display:grid;gap:28px;");
+  core.log("  grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}");
+  core.log(".card{background:var(--paper);border-radius:16px;padding:20px 20px 22px;");
+  core.log("  box-shadow:0 1px 2px rgba(16,26,43,.08),0 10px 26px rgba(16,26,43,.06)}");
+  core.log(".card h2{margin:0;font-size:12.5px;font-weight:700;letter-spacing:.08em;");
+  core.log("  text-transform:uppercase;color:var(--muted)}");
+  core.log(".card .meta{margin:2px 0 14px;font-size:12px;color:#93a0b6}");
+  core.log(".grid{position:relative;display:grid;background:var(--rule);gap:1px;");
+  core.log("  border:2.5px solid var(--thick);border-radius:4px;overflow:hidden}");
+  core.log(".cell{position:relative;background:var(--paper);aspect-ratio:1/1}");
+  // A faint tint on alternate boxes, as the printed puzzle has. It makes the 3x2 blocks legible
+  // without another line weight competing with the cage dashes.
+  core.log(".cell.tint{background:#f4f7fc}");
+  core.log(".cell.bxr{box-shadow:2px 0 0 0 var(--thick)}");
+  core.log(".cell.bxb{box-shadow:0 2px 0 0 var(--thick)}");
+  core.log(".cell.bxr.bxb{box-shadow:2px 0 0 0 var(--thick),0 2px 0 0 var(--thick)}");
+  core.log("svg.cages{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}");
+  core.log("svg.cages line{stroke:var(--cage);stroke-width:2.6;stroke-linecap:round;");
+  core.log("  stroke-dasharray:9 6.5}");
+  core.log(".sum{position:absolute;z-index:3;font-size:11px;line-height:1;font-weight:700;");
+  core.log("  color:var(--cage);letter-spacing:.01em;");
+  core.log("  font-variant-numeric:tabular-nums}");
+  core.log(".val{position:absolute;inset:0;display:grid;place-items:center;font-size:20px;");
+  core.log("  font-weight:480;color:#16233a;font-variant-numeric:tabular-nums}");
+  core.log("section.key{max-width:1200px;margin:52px auto 0}");
+  core.log("section.key > h2{font-size:12.5px;margin:0 0 16px;color:var(--muted);");
+  core.log("  text-transform:uppercase;letter-spacing:.08em}");
+  core.log(".keys{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(148px,1fr))}");
+  core.log(".keys .card{padding:12px}.keys .card h2{font-size:11px;margin-bottom:8px}");
+  core.log(".keys .val{font-size:13px;font-weight:500;color:#3b4a66}");
+  core.log(".keys .grid{border-width:1.5px}");
+  core.log("@media print{");
+  core.log("  body{background:#fff;padding:0;font-size:12px}");
+  core.log("  .card{box-shadow:none;border:1px solid #d5dbe6;break-inside:avoid;page-break-inside:avoid}");
+  core.log("  .sheet{gap:16px;grid-template-columns:repeat(2,1fr)}header{margin-bottom:16px}");
+  core.log("  section.key{break-before:page;page-break-before:always}");
+  core.log("}");
+  core.log("</style></head><body>");
+  core.log("<header><h1>Killer Sudoku</h1>");
+  core.log("<p class=\"sub\">" + digits(nPuz) + " puzzles &middot; 6&times;6 with 3&times;2 boxes. "
+         + "Rows, columns and boxes each hold 1&ndash;6 once. Every dashed cage adds to its small "
+         + "number, and no digit repeats inside a cage. Each puzzle has exactly one solution.</p></header>");
+  core.log("<div class=\"sheet\">");
+
+  for (i32 pi = 0; pi < nPuz; pi++) {
+    Puz p = all[pi];
+    i32 nn = p.n;
+    i32 cells = nn * nn;
+    i32 S = SS();
+    i32 d = DD();
+
+    i32[] anchor = i32[p.nCages]();
+    for (i32 k = 0; k < p.nCages; k++) { anchor[k] = 0 - 1; }
+    for (i32 idx = 0; idx < cells; idx++) {
+      i32 g = p.cageOf[idx];
+      if (anchor[g] < 0) { anchor[g] = idx; }
+    }
+
+    core.log("<div class=\"card\"><h2>Puzzle " + digits(pi + 1) + "</h2>");
+    core.log("<p class=\"meta\">" + digits(p.nCages) + " cages</p>");
+    core.log("<div class=\"grid\" style=\"grid-template-columns:repeat(" + digits(nn) + ",1fr)\">");
+
+    for (i32 r = 0; r < nn; r++) {
+      for (i32 c = 0; c < nn; c++) {
+        string cls = "cell";
+        if (((r / p.boxH) + (c / p.boxW)) % 2 == 1) { cls = cls + " tint"; }
+        if (c < nn - 1) { if ((c + 1) % p.boxW == 0) { cls = cls + " bxr"; } }
+        if (r < nn - 1) { if ((r + 1) % p.boxH == 0) { cls = cls + " bxb"; } }
+        core.log("<div class=\"" + cls + "\"></div>");
+      }
+    }
+
+    // ── the cage outline ──────────────────────────────────────────────────
+    //
+    // Drawn as one line per **maximal straight run** of boundary edges rather than one box per
+    // cell. Per-cell boxes were what the first version did and it read as a grid of little dashed
+    // squares: each cell inset its own outline, so two cells of one cage left a gap between them.
+    //
+    // A run's ends are nudged by the inset in whichever direction closes the corner: inward when
+    // the cage turns there, outward when the cage carries on around the corner. That is what makes
+    // the horizontal and vertical runs meet at exactly one point instead of stopping short.
+    core.log("<svg class=\"cages\" viewBox=\"0 0 " + digits(nn * S) + " " + digits(nn * S) + "\">");
+    for (i32 side = 0; side < 4; side++) {
+      if (side == 0 || side == 2) {
+        for (i32 r = 0; r < nn; r++) {
+          i32 c = 0;
+          while (c < nn) {
+            i32 idx = r * nn + c;
+            if (!bnd(p.cageOf, nn, idx, side)) { c = c + 1; continue; }
+            i32 g = p.cageOf[idx];
+            i32 c2 = c;
+            while (c2 + 1 < nn) {
+              i32 nxt = r * nn + c2 + 1;
+              if (!bnd(p.cageOf, nn, nxt, side)) { c2 = c2; break; }
+              if (p.cageOf[nxt] != g) { c2 = c2; break; }
+              c2 = c2 + 1;
+            }
+            i32 y = r * S + d;
+            if (side == 2) { y = (r + 1) * S - d; }
+            i32 x1 = c * S - d;
+            if (bnd(p.cageOf, nn, r * nn + c, 3)) { x1 = c * S + d; }
+            // Leave a gap at the cage's own corner for its total to sit in, the way a printed
+            // killer does. Masking the line behind the number instead left a stub of dash poking
+            // out of the corner, which read as a mistake.
+            if (side == 0) { if (r * nn + c == anchor[g]) { x1 = c * S + d + 25; } }
+            i32 x2 = (c2 + 1) * S + d;
+            if (bnd(p.cageOf, nn, r * nn + c2, 1)) { x2 = (c2 + 1) * S - d; }
+            core.log("<line x1=\"" + num(x1) + "\" y1=\"" + num(y) + "\" x2=\"" + num(x2)
+                   + "\" y2=\"" + num(y) + "\"/>");
+            c = c2 + 1;
+          }
+        }
+      } else {
+        for (i32 c = 0; c < nn; c++) {
+          i32 r = 0;
+          while (r < nn) {
+            i32 idx = r * nn + c;
+            if (!bnd(p.cageOf, nn, idx, side)) { r = r + 1; continue; }
+            i32 g = p.cageOf[idx];
+            i32 r2 = r;
+            while (r2 + 1 < nn) {
+              i32 nxt = (r2 + 1) * nn + c;
+              if (!bnd(p.cageOf, nn, nxt, side)) { r2 = r2; break; }
+              if (p.cageOf[nxt] != g) { r2 = r2; break; }
+              r2 = r2 + 1;
+            }
+            i32 x = c * S + d;
+            if (side == 1) { x = (c + 1) * S - d; }
+            i32 y1 = r * S - d;
+            if (bnd(p.cageOf, nn, r * nn + c, 0)) { y1 = r * S + d; }
+            if (side == 3) { if (r * nn + c == anchor[g]) { y1 = r * S + d + 17; } }
+            i32 y2 = (r2 + 1) * S + d;
+            if (bnd(p.cageOf, nn, r2 * nn + c, 2)) { y2 = (r2 + 1) * S - d; }
+            core.log("<line x1=\"" + num(x) + "\" y1=\"" + num(y1) + "\" x2=\"" + num(x)
+                   + "\" y2=\"" + num(y2) + "\"/>");
+            r = r2 + 1;
+          }
+        }
+      }
+    }
+    core.log("</svg>");
+
+    // Totals sit in their own layer above the outline, on a small patch of paper, so the dashes
+    // break around the number instead of striking through it.
+    for (i32 k = 0; k < p.nCages; k++) {
+      i32 idx = anchor[k];
+      i32 r = idx / nn;
+      i32 c = idx % nn;
+      core.log("<span class=\"sum\" style=\"left:calc((100%/" + digits(nn) + ")*" + digits(c)
+             + " + 4px);top:calc((100%/" + digits(nn) + ")*" + digits(r) + " + 3px)\">"
+             + digits(p.sums[k]) + "</span>");
+    }
+    core.log("</div></div>");
+  }
+  core.log("</div>");
+
+  bool any = false;
+  for (i32 pi = 0; pi < nPuz; pi++) { if (all[pi].hasSol) { any = true; } }
+  if (any) {
+    core.log("<section class=\"key\"><h2>Answers</h2><div class=\"keys\">");
+    for (i32 pi = 0; pi < nPuz; pi++) {
+      Puz p = all[pi];
+      if (!p.hasSol) { continue; }
+      i32 nn = p.n;
+      core.log("<div class=\"card\"><h2>" + digits(pi + 1) + "</h2>");
+      core.log("<div class=\"grid\" style=\"grid-template-columns:repeat(" + digits(nn) + ",1fr)\">");
+      for (i32 r = 0; r < nn; r++) {
+        for (i32 c = 0; c < nn; c++) {
+          string cls = "cell";
+          if (((r / p.boxH) + (c / p.boxW)) % 2 == 1) { cls = cls + " tint"; }
+          if (c < nn - 1) { if ((c + 1) % p.boxW == 0) { cls = cls + " bxr"; } }
+          if (r < nn - 1) { if ((r + 1) % p.boxH == 0) { cls = cls + " bxb"; } }
+          core.log("<div class=\"" + cls + "\"><span class=\"val\">"
+                 + digits(p.sol[r * nn + c]) + "</span></div>");
+        }
+      }
+      core.log("</div></div>");
+    }
+    core.log("</div></section>");
+  }
+
+  core.log("</body></html>");
+  return 0;
+}

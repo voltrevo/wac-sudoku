@@ -1,0 +1,22 @@
+# The puzzle this project started from: a 6x6 killer sudoku in a newspaper, transcribed from a
+# photograph. Only the printed totals and where they sit are given here — the cage shapes are not,
+# because they were not known. `killer.wac` derives them:
+#
+#     wac run src/killer.wac < examples/photographed.txt
+#
+# It works because eleven totals adding to 126 = 6 x 21 can only be a partition of all 36 cells,
+# and because a cage's total is printed in its topmost-then-leftmost cell.
+
+size 6 3 2
+
+cage 1 1 10
+cage 1 2 6
+cage 1 4 11
+cage 2 2 15
+cage 2 3 13
+cage 2 5 11
+cage 4 2 20
+cage 4 3 18
+cage 5 4 8
+cage 6 3 4
+cage 6 5 10

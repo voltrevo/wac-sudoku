@@ -1,0 +1,342 @@
+# 20 killer sudoku, 6x6, boxes 3x2, seed 20260906
+# every one checked to have exactly one solution at every merge
+
+=== puzzle 1
+size 6 3 2
+map ABBBCC
+map ADEEEC
+map ADFFEC
+map AGHHHC
+map GGGIJJ
+map KKKIII
+sums 13 15 17 7 10 10 12 11 17 4 10
+# sol 164532
+# sol 523146
+# sol 356421
+# sol 412365
+# sol 245613
+# sol 631254
+# cages 11, given digits 0, attempts 1
+
+=== puzzle 2
+size 6 3 2
+map ABBCCD
+map AEFFDD
+map AEEFFD
+map GGEHFD
+map GGEHII
+map JJJJII
+sums 15 9 7 16 18 17 11 5 14 14
+# sol 463251
+# sol 512346
+# sol 624513
+# sol 135462
+# sol 256134
+# sol 341625
+# cages 10, given digits 0, attempts 10
+
+=== puzzle 3
+size 6 3 2
+map ABBBCD
+map AEECCD
+map AAECDD
+map FAGCDH
+map FFGGHH
+map FFIIII
+sums 17 10 16 20 14 18 11 10 10
+# sol 241563
+# sol 536214
+# sol 315426
+# sol 462351
+# sol 123645
+# sol 654132
+# cages 9, given digits 0, attempts 2
+
+=== puzzle 4
+size 6 3 2
+map AAABBC
+map DEEBCC
+map DEFGGG
+map DHFIII
+map HHFIJJ
+map HHFKKK
+sums 14 11 10 11 7 11 13 20 13 7 9
+# sol 536412
+# sol 124653
+# sol 413265
+# sol 652341
+# sol 261534
+# sol 345126
+# cages 11, given digits 0, attempts 5
+
+=== puzzle 5
+size 6 3 2
+map ABBCCC
+map AADDCE
+map ADDFCE
+map GGGFFE
+map HHHFII
+map HHJJJI
+sums 16 5 19 14 10 14 11 20 7 10
+# sol 432156
+# sol 156432
+# sol 613245
+# sol 245613
+# sol 364521
+# sol 521364
+# cages 10, given digits 0, attempts 5
+
+=== puzzle 6
+size 6 3 2
+map AAABBB
+map CAADDB
+map CCEEEE
+map CCFFGH
+map IJJKGH
+map IIIKKK
+sums 19 16 15 5 13 5 7 8 14 7 17
+# sol 614532
+# sol 253146
+# sol 536421
+# sol 142365
+# sol 425613
+# sol 361254
+# cages 11, given digits 0, attempts 3
+
+=== puzzle 7
+size 6 3 2
+map AAABBB
+map CCCBBD
+map EECCDD
+map FEGGGG
+map FEEHII
+map JJJHII
+sums 13 17 18 12 16 6 14 5 16 9
+# sol 643521
+# sol 512634
+# sol 126453
+# sol 435162
+# sol 264315
+# sol 351246
+# cages 10, given digits 0, attempts 7
+
+=== puzzle 8
+size 6 3 2
+map AAABBB
+map CCDDEB
+map FCDEEB
+map FFGEEH
+map IIGJHH
+map IIIJJJ
+sums 8 18 13 9 15 13 8 12 15 15
+# sol 143562
+# sol 265341
+# sol 651234
+# sol 432156
+# sol 326415
+# sol 514623
+# cages 10, given digits 0, attempts 1
+
+=== puzzle 9
+size 6 3 2
+map AABCCC
+map DABBEF
+map DABEEF
+map DGGGGG
+map DHHIJJ
+map KKHIII
+sums 13 11 12 13 8 9 20 10 17 4 9
+# sol 513462
+# sol 642153
+# sol 435216
+# sol 126345
+# sol 254631
+# sol 361524
+# cages 11, given digits 0, attempts 3
+
+=== puzzle 10
+size 6 3 2
+map AAABBB
+map AACCDD
+map EFFCGG
+map EFHHHG
+map EIJJJK
+map EIILLK
+sums 20 8 10 10 15 11 9 8 9 10 8 8
+# sol 436521
+# sol 251346
+# sol 514632
+# sol 362154
+# sol 625413
+# sol 143265
+# cages 12, given digits 0, attempts 2
+
+=== puzzle 11
+size 6 3 2
+map AAABBB
+map CAABDE
+map CFFBDE
+map CGGDDE
+map CHGIJJ
+map HHIIIJ
+sums 16 19 13 14 9 8 14 7 11 15
+# sol 624531
+# sol 531624
+# sol 162453
+# sol 453162
+# sol 316245
+# sol 245316
+# cages 10, given digits 0, attempts 1
+
+=== puzzle 12
+size 6 3 2
+map AAABBB
+map CDDEBB
+map CCEEFF
+map GGGGHF
+map IIIIHF
+map JJIHHH
+sums 10 17 10 9 7 15 14 18 17 9
+# sol 415236
+# sol 236415
+# sol 352164
+# sol 164352
+# sol 621543
+# sol 543621
+# cages 10, given digits 0, attempts 4
+
+=== puzzle 13
+size 6 3 2
+map ABCCCC
+map ABBBDD
+map ABEEEE
+map AFFFGH
+map IIJFGH
+map IIJKKK
+sums 14 20 15 5 14 10 10 11 13 8 6
+# sol 241653
+# sol 635214
+# sol 164532
+# sol 523146
+# sol 312465
+# sol 456321
+# cages 11, given digits 0, attempts 1
+
+=== puzzle 14
+size 6 3 2
+map AABBCC
+map DDEBCC
+map DEEEFF
+map GGEHHF
+map IIJHHK
+map JJJLLK
+sums 10 13 10 9 19 8 6 14 7 14 11 5
+# sol 462513
+# sol 351624
+# sol 136452
+# sol 245361
+# sol 523146
+# sol 614235
+# cages 12, given digits 0, attempts 1
+
+=== puzzle 15
+size 6 3 2
+map ABBCCC
+map ADEEEE
+map DDFGHH
+map FFFGHI
+map JJJKKI
+map LLKKKI
+sums 7 6 9 10 17 14 5 15 6 7 19 11
+# sol 624135
+# sol 135624
+# sol 251346
+# sol 346251
+# sol 412563
+# sol 563412
+# cages 12, given digits 0, attempts 2
+
+=== puzzle 16
+size 6 3 2
+map ABBBCC
+map AADEEE
+map FFDDEE
+map FFGHHI
+map JJGGGI
+map JJJKKK
+sums 12 9 7 15 15 10 11 9 8 18 12
+# sol 532461
+# sol 614253
+# sol 326514
+# sol 145632
+# sol 453126
+# sol 261345
+# cages 11, given digits 0, attempts 8
+
+=== puzzle 17
+size 6 3 2
+map AABCCC
+map AABDDE
+map ABBDEE
+map FFGDEE
+map FGGGHH
+map IIIHHH
+sums 16 14 9 13 20 14 16 17 7
+# sol 435261
+# sol 612543
+# sol 243156
+# sol 561324
+# sol 356412
+# sol 124635
+# cages 9, given digits 0, attempts 1
+
+=== puzzle 18
+size 6 3 2
+map AABBCC
+map DEEBCC
+map DEFFGG
+map HHIIGG
+map HJIKKK
+map JJJLLK
+sums 8 11 14 6 9 7 11 14 9 16 14 7
+# sol 534216
+# sol 216534
+# sol 421653
+# sol 653421
+# sol 342165
+# sol 165342
+# cages 12, given digits 0, attempts 6
+
+=== puzzle 19
+size 6 3 2
+map AABBBB
+map ACCCDD
+map AEFCDD
+map EEFFGH
+map EEGGGH
+map IIIIIH
+sums 15 13 14 12 16 11 13 15 17
+# sol 623541
+# sol 451263
+# sol 345612
+# sol 162435
+# sol 234156
+# sol 516324
+# cages 9, given digits 0, attempts 3
+
+=== puzzle 20
+size 6 3 2
+map AAABBB
+map CADDBE
+map CCDDFE
+map GCCDFH
+map GIJJFH
+map IIJJKK
+sums 13 14 19 17 10 10 7 8 8 17 3
+# sol 164352
+# sol 325146
+# sol 653214
+# sol 241635
+# sol 512463
+# sol 436521
+# cages 11, given digits 0, attempts 4

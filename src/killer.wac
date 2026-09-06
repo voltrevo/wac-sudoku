@@ -1,0 +1,423 @@
+// A killer sudoku solver that reads the puzzle, including working out the cages.
+//
+//     wac run src/killer.wac < puzzle.txt
+//
+// ## Why the cages are part of the problem
+//
+// A killer sudoku is a grid, a box shape, and a set of cages with totals. From a photograph the
+// totals and their positions are legible and the **cage borders often are not** — thin lines, and a
+// cage that steps around a corner reads as two. So a solver that demands the cage map as input has
+// left the hard half to whoever types it in.
+//
+// This one accepts either. Give it a map and it solves. Give it only the printed numbers and where
+// they sit and it *derives* the map, because three facts make that a finite search:
+//
+//   - a cage's number is printed in its topmost-then-leftmost cell, so every cage has a known anchor
+//     and no cell of it may precede that anchor in reading order;
+//   - a cage's cells are connected and hold no repeated digit, so it has at most N cells and its
+//     total must lie between the smallest and largest totals that many distinct digits can make;
+//   - a well-formed puzzle has **exactly one** solution, which discards the partitions that merely
+//     fit.
+//
+// ## Input
+//
+//     size 6 3 2            grid N, box width, box height   (width * height = N)
+//     cage 1 1 10           a printed total: row, column (1-based), total
+//     ...
+//
+// or, when the borders are legible:
+//
+//     size 6 3 2
+//     map ABBCCC            one row per line, one letter per cage
+//     ...
+//     sums 10 6 11 ...      in letter order
+//
+// `#` starts a comment; blank lines are ignored.
+//
+// ## Limits
+//
+// Solving is general: digits 1..N for N up to 30, any box shape that tiles. Deriving a map also
+// wants N*N <= 64, because the search marks cells in one fixed array — 6x6 and 8x8 are fine, 9x9
+// must bring its own map.
+
+import { Core, Cli } from "std/platform.wac";
+import { digits, isSpace, toInt, letterFor } from "./text.wac";
+import { Solver, runSolve, minK, maxK } from "./solve.wac";
+
+// ── parsing ──────────────────────────────────────────────────────────────────
+
+/** The puzzle as read, before anything is worked out about it. */
+struct Spec {
+  i32 n;
+  i32 boxW;
+  i32 boxH;
+  i32[] anchor;   // cell index of each printed total
+  i32[] total;    // the total itself
+  i32 count;
+  i32[] given;    // cage index per cell, when a map was supplied
+  bool hasMap;
+  string error;
+}
+
+/**
+ * Read the input.
+ *
+ * Hand-rolled rather than reaching for a parser: the grammar is four keywords, and the diagnostics
+ * matter more than the parsing does. A mistyped puzzle should say which line, not just fail to solve.
+ */
+Spec parse(u8[] src) {
+  i32 n = 0;
+  i32 bw = 0;
+  i32 bh = 0;
+  i32[] anchor = i32[128]();
+  i32[] total = i32[128]();
+  i32 count = 0;
+  i32[] given = i32[0]();
+  bool hasMap = false;
+  string err = "";
+  string[] mapRows = string[64](fill: "");
+  i32 mapRowCount = 0;
+  i32[] sums = i32[128]();
+  i32 sumCount = 0;
+
+  i32 at = 0;
+  i32 lineNo = 0;
+  while (at < src.len()) {
+    i32 eol = at;
+    while (eol < src.len()) {
+      if (src[eol] == 10) { eol = eol; break; }
+      eol = eol + 1;
+    }
+    lineNo = lineNo + 1;
+
+    string[] w = string[32](fill: "");
+    i32 nw = 0;
+    i32 i = at;
+    bool done = false;
+    while (i < eol) {
+      if (done) { i = eol; continue; }
+      while (i < eol) {
+        if (!isSpace(src[i])) { break; }
+        i = i + 1;
+      }
+      if (i >= eol) { continue; }
+      if (src[i] == '#') { done = true; continue; }
+      i32 s = i;
+      while (i < eol) {
+        if (isSpace(src[i])) { break; }
+        i = i + 1;
+      }
+      if (nw < 32) {
+        u8[] piece = u8[i - s]();
+        for (i32 k = 0; k < i - s; k++) { piece[k] = src[s + k]; }
+        w[nw] = string.fromBytes(piece);
+        nw = nw + 1;
+      }
+    }
+
+    if (nw > 0) {
+      if (err == "") {
+        string head = w[0];
+        if (head == "size") {
+          if (nw != 4) { err = "line " + digits(lineNo) + ": size wants three numbers"; }
+          else {
+            n = toInt(w[1]); bw = toInt(w[2]); bh = toInt(w[3]);
+            if (n <= 0 || bw <= 0 || bh <= 0 || bw * bh != n) {
+              err = "line " + digits(lineNo) + ": boxes of " + digits(bw) + "x" + digits(bh)
+                  + " do not tile a row of " + digits(n);
+            }
+          }
+        } else if (head == "cage") {
+          if (nw != 4) { err = "line " + digits(lineNo) + ": cage wants row, column, total"; }
+          else if (n == 0) { err = "line " + digits(lineNo) + ": cage before size"; }
+          else {
+            i32 r = toInt(w[1]) - 1;
+            i32 c = toInt(w[2]) - 1;
+            if (r < 0 || r >= n || c < 0 || c >= n) {
+              err = "line " + digits(lineNo) + ": cage is off the grid";
+            } else {
+              anchor[count] = r * n + c;
+              total[count] = toInt(w[3]);
+              count = count + 1;
+            }
+          }
+        } else if (head == "map") {
+          if (nw != 2) { err = "line " + digits(lineNo) + ": map wants one row of letters"; }
+          else { mapRows[mapRowCount] = w[1]; mapRowCount = mapRowCount + 1; hasMap = true; }
+        } else if (head == "sums") {
+          for (i32 k = 1; k < nw; k++) { sums[sumCount] = toInt(w[k]); sumCount = sumCount + 1; }
+        } else {
+          err = "line " + digits(lineNo) + ": unknown keyword '" + head + "'";
+        }
+      }
+    }
+    at = eol + 1;
+  }
+
+  if (err == "") {
+    if (n == 0) { err = "no size line"; }
+  }
+
+  if (err == "") {
+    if (hasMap) {
+      if (mapRowCount != n) {
+        err = "map has " + digits(mapRowCount) + " rows, expected " + digits(n);
+      } else {
+        given = i32[n * n]();
+        i32 seen = 0;
+        i32[] letterOf = i32[128]();
+        for (i32 k = 0; k < 128; k++) { letterOf[k] = 0 - 1; }
+        for (i32 r = 0; r < n; r++) {
+          if (err != "") { continue; }
+          u8[] rb = mapRows[r].toBytes();
+          if (rb.len() != n) {
+            err = "map row " + digits(r + 1) + " is not " + digits(n) + " characters";
+          } else {
+            for (i32 c = 0; c < n; c++) {
+              i32 ch = rb[c];
+              if (letterOf[ch] < 0) { letterOf[ch] = seen; seen = seen + 1; }
+              given[r * n + c] = letterOf[ch];
+            }
+          }
+        }
+        if (err == "") {
+          if (sumCount != seen) {
+            err = "map uses " + digits(seen) + " letters but " + digits(sumCount) + " sums given";
+          } else {
+            count = seen;
+            for (i32 k = 0; k < seen; k++) { total[k] = sums[k]; }
+          }
+        }
+      }
+    }
+  }
+
+  return Spec(n, bw, bh, anchor, total, count, given, hasMap, err);
+}
+
+// ── deriving the cage map ────────────────────────────────────────────────────
+
+/**
+ * Grows each cage outward from its printed anchor.
+ *
+ * The awkward part is enumerating every connected shape once and once only. Adding cells in
+ * increasing index order is canonical but misses shapes that reach around a corner; adding any
+ * adjacent cell produces each shape many times. So: take the frontier, and after trying a candidate
+ * **ban it** for the rest of that loop and everything below it. Each shape then has exactly one path
+ * through the search, and the bans unwind on the way out.
+ */
+struct Finder {
+  i32 n;
+  i32 boxW;
+  i32 boxH;
+  i32 nCages;
+  i32[] anchor;
+  i32[] sums;
+  i32[] minSize;
+  i32[] maxSize;
+  i32[] owner;
+  /**
+   * Which cage banned a cell, or -1.
+   *
+   * Stamped rather than a plain flag, and that was a real bug: a ban means *do not add this cell to
+   * the cage now growing*, and a shared flag leaked that into the next cage's frontier, which made
+   * the search find nothing at all.
+   */
+  i32[] banBy;
+  bool[] isAnchor;
+  i32 partitions;
+  i32 unique;
+  i32[] bestMap;
+  i32[] bestGrid;
+  i32 assigned;
+  i32 examined;
+
+  bool touches(const this, i32 cell, i32 g) {
+    i32 n = this.n;
+    i32 r = cell / n;
+    i32 c = cell % n;
+    if (r > 0) { if (this.owner[cell - n] == g) { return true; } }
+    if (r < n - 1) { if (this.owner[cell + n] == g) { return true; } }
+    if (c > 0) { if (this.owner[cell - 1] == g) { return true; } }
+    if (c < n - 1) { if (this.owner[cell + 1] == g) { return true; } }
+    return false;
+  }
+
+  void complete(this) {
+    i32 cells = this.n * this.n;
+    if (this.assigned != cells) { return; }
+    this.partitions = this.partitions + 1;
+    i32[] copy = i32[cells]();
+    for (i32 i = 0; i < cells; i++) { copy[i] = this.owner[i]; }
+    Solver s = runSolve(this.n, this.boxW, this.boxH, this.nCages, copy, this.sums, 2);
+    this.examined = this.examined + 1;
+    if (s.count == 1) {
+      this.unique = this.unique + 1;
+      if (this.unique == 1) {
+        for (i32 i = 0; i < cells; i++) {
+          this.bestMap[i] = copy[i];
+          this.bestGrid[i] = s.first[i];
+        }
+      }
+    }
+  }
+
+  void startCage(this, i32 gi) {
+    if (gi == this.nCages) { this.complete(); return; }
+    i32 cells = this.n * this.n;
+    i32 free = cells - this.assigned;
+    i32 lo = 0;
+    i32 hi = 0;
+    for (i32 k = gi; k < this.nCages; k++) {
+      lo = lo + this.minSize[k];
+      hi = hi + this.maxSize[k];
+    }
+    if (free < lo) { return; }
+    if (free > hi) { return; }
+    i32 a = this.anchor[gi];
+    if (this.owner[a] != 0 - 1) { return; }
+    this.owner[a] = gi;
+    this.assigned = this.assigned + 1;
+    this.growCage(gi, 1);
+    this.owner[a] = 0 - 1;
+    this.assigned = this.assigned - 1;
+  }
+
+  void growCage(this, i32 gi, i32 size) {
+    if (size >= this.minSize[gi]) { this.startCage(gi + 1); }
+    if (size >= this.maxSize[gi]) { return; }
+
+    i32 cells = this.n * this.n;
+    i32 a = this.anchor[gi];
+    i32[] fr = i32[cells]();
+    i32 nf = 0;
+    for (i32 cell = a + 1; cell < cells; cell++) {
+      if (this.owner[cell] != 0 - 1) { continue; }
+      if (this.banBy[cell] == gi) { continue; }
+      if (this.isAnchor[cell]) { continue; }
+      if (!this.touches(cell, gi)) { continue; }
+      fr[nf] = cell;
+      nf = nf + 1;
+    }
+    for (i32 k = 0; k < nf; k++) {
+      i32 cell = fr[k];
+      this.owner[cell] = gi;
+      this.assigned = this.assigned + 1;
+      this.growCage(gi, size + 1);
+      this.owner[cell] = 0 - 1;
+      this.assigned = this.assigned - 1;
+      this.banBy[cell] = gi;
+    }
+    for (i32 k = 0; k < nf; k++) { this.banBy[fr[k]] = 0 - 1; }
+  }
+}
+
+// ── output ───────────────────────────────────────────────────────────────────
+
+string rowText(i32[] g, i32 n, i32 r) {
+  string line = "";
+  for (i32 c = 0; c < n; c++) { line = line + " " + digits(g[r * n + c]); }
+  return line;
+}
+
+string mapText(i32[] m, i32 n, i32 r) {
+  string line = "";
+  for (i32 c = 0; c < n; c++) {
+    i32 g = m[r * n + c];
+    line = line + letterFor(g);
+  }
+  return line;
+}
+
+export i32 main(Core core, Cli cli) {
+  u8[] src = cli.readStdin().wait();
+  if (src.len() == 0) {
+    core.log("killer: no puzzle on stdin — see the header of this file for the format");
+    return 2;
+  }
+  Spec p = parse(src);
+  if (p.error != "") { core.log("killer: " + p.error); return 2; }
+
+  i32 n = p.n;
+  i32 cells = n * n;
+  i32 want = 0;
+  for (i32 k = 0; k < p.count; k++) { want = want + p.total[k]; }
+  i32 whole = n * (n * (n + 1) / 2);
+  core.log("grid " + digits(n) + "x" + digits(n) + ", boxes " + digits(p.boxW) + "x" + digits(p.boxH)
+         + ", " + digits(p.count) + " cages, totals " + digits(want)
+         + " (a full grid is " + digits(whole) + ")");
+  if (want != whole) {
+    core.log("killer: the totals do not add to a full grid — a cage is missing or misread");
+    return 2;
+  }
+
+  if (p.hasMap) {
+    i32 cap = 3;
+    Solver s = runSolve(n, p.boxW, p.boxH, p.count, p.given, p.total, cap);
+    // The search stops at the cap, so the count is a floor once it reaches it — saying "3" when the
+    // truth is "at least 3" would be the kind of number a reader trusts and should not.
+    string howMany = digits(s.count);
+    if (s.count >= cap) { howMany = digits(cap) + " or more"; }
+    core.log("solutions: " + howMany);
+    if (s.count == 0) { core.log("killer: no solution — check the map or the totals"); return 1; }
+    for (i32 r = 0; r < n; r++) { core.log(rowText(s.first, n, r)); }
+    if (s.count > 1) { core.log("killer: not unique"); return 1; }
+    return 0;
+  }
+
+  if (cells > 64) {
+    core.log("killer: deriving a map is limited to 64 cells here — supply map lines for "
+           + digits(n) + "x" + digits(n));
+    return 2;
+  }
+
+  i32[] minS = i32[p.count]();
+  i32[] maxS = i32[p.count]();
+  for (i32 k = 0; k < p.count; k++) {
+    i32 lo = 0;
+    i32 hi = 0;
+    for (i32 sz = 1; sz <= n; sz++) {
+      if (minK(sz) <= p.total[k]) {
+        if (p.total[k] <= maxK(sz, n)) {
+          if (lo == 0) { lo = sz; }
+          hi = sz;
+        }
+      }
+    }
+    if (lo == 0) {
+      core.log("killer: no cage of any size adds to " + digits(p.total[k]));
+      return 2;
+    }
+    minS[k] = lo;
+    maxS[k] = hi;
+  }
+
+  i32[] owner = i32[cells]();
+  i32[] banBy = i32[cells]();
+  bool[] isAnchor = bool[cells]();
+  for (i32 i = 0; i < cells; i++) { owner[i] = 0 - 1; banBy[i] = 0 - 1; }
+  for (i32 k = 0; k < p.count; k++) { isAnchor[p.anchor[k]] = true; }
+  Finder f = Finder(n, p.boxW, p.boxH, p.count, p.anchor, p.total, minS, maxS,
+                    owner, banBy, isAnchor, 0, 0, i32[cells](), i32[cells](), 0, 0);
+  f.startCage(0);
+
+  core.log("cage maps fitting the anchors and totals: " + digits(f.partitions));
+  core.log("of those, solving uniquely: " + digits(f.unique));
+  if (f.unique == 0) {
+    core.log("killer: none — a total or a printed position is misread");
+    return 1;
+  }
+  core.log("");
+  core.log("cages:");
+  for (i32 r = 0; r < n; r++) { core.log("  " + mapText(f.bestMap, n, r)); }
+  core.log("");
+  core.log("solution:");
+  for (i32 r = 0; r < n; r++) { core.log(rowText(f.bestGrid, n, r)); }
+  if (f.unique > 1) {
+    core.log("");
+    core.log("killer: " + digits(f.unique) + " different cage maps each solve uniquely, so the");
+    core.log("        puzzle as transcribed is ambiguous — the one above is just the first found");
+    return 1;
+  }
+  return 0;
+}

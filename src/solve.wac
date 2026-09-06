@@ -1,0 +1,121 @@
+// The killer sudoku solver itself: rows, columns and boxes hold 1..N once, and each cage's cells
+// add to its total with no digit repeated inside it.
+//
+// Counting rather than stopping at the first answer is the whole point of the interface. A solver
+// that returns *a* solution cannot say whether a puzzle is well formed, and both callers here need
+// that — the reader to know it transcribed the picture correctly, the generator to know it has made
+// a puzzle rather than a suggestion.
+
+/** Smallest total `k` distinct digits from 1..N can make. */
+export i32 minK(i32 k) { return k * (k + 1) / 2; }
+
+/** Largest total `k` distinct digits from 1..N can make. */
+export i32 maxK(i32 k, i32 n) { return k * n - k * (k - 1) / 2; }
+
+export struct Solver {
+  i32 n;
+  i32 boxW;
+  i32 boxH;
+  i32[] cageOf;
+  i32[] cageSum;
+  i32[] grid;
+  i32[] rowMask;
+  i32[] colMask;
+  i32[] boxMask;
+  i32[] cageMask;
+  i32[] cageAcc;
+  i32[] cageLeft;
+  i32 count;
+  i32 cap;
+  i32[] first;
+
+  i32 boxOf(const this, i32 idx) {
+    i32 r = idx / this.n;
+    i32 c = idx % this.n;
+    return (r / this.boxH) * (this.n / this.boxW) + (c / this.boxW);
+  }
+
+  /** Least total `k` unused digits could make; a number too large when there are not `k` left. */
+  i32 loRest(const this, i32 mask, i32 k) {
+    i32 s = 0;
+    i32 got = 0;
+    for (i32 d = 1; d <= this.n; d++) {
+      if (got >= k) { continue; }
+      if ((mask & (1 << d)) == 0) { s = s + d; got = got + 1; }
+    }
+    if (got < k) { return this.n * this.n; }
+    return s;
+  }
+
+  /** Greatest total `k` unused digits could make; -1 when there are not `k` left. */
+  i32 hiRest(const this, i32 mask, i32 k) {
+    i32 s = 0;
+    i32 got = 0;
+    for (i32 d = this.n; d >= 1; d--) {
+      if (got >= k) { continue; }
+      if ((mask & (1 << d)) == 0) { s = s + d; got = got + 1; }
+    }
+    if (got < k) { return 0 - 1; }
+    return s;
+  }
+
+  void search(this, i32 idx) {
+    if (this.count >= this.cap) { return; }
+    i32 cells = this.n * this.n;
+    if (idx == cells) {
+      this.count = this.count + 1;
+      if (this.count == 1) {
+        for (i32 i = 0; i < cells; i++) { this.first[i] = this.grid[i]; }
+      }
+      return;
+    }
+    i32 r = idx / this.n;
+    i32 c = idx % this.n;
+    i32 b = this.boxOf(idx);
+    i32 g = this.cageOf[idx];
+    for (i32 d = 1; d <= this.n; d++) {
+      i32 bit = 1 << d;
+      if ((this.rowMask[r] & bit) != 0) { continue; }
+      if ((this.colMask[c] & bit) != 0) { continue; }
+      if ((this.boxMask[b] & bit) != 0) { continue; }
+      if ((this.cageMask[g] & bit) != 0) { continue; }
+      i32 acc = this.cageAcc[g] + d;
+      if (acc > this.cageSum[g]) { continue; }
+      i32 left = this.cageLeft[g] - 1;
+      i32 need = this.cageSum[g] - acc;
+      i32 nm = this.cageMask[g] | bit;
+      if (left == 0) {
+        if (need != 0) { continue; }
+      } else {
+        if (need < this.loRest(nm, left)) { continue; }
+        if (need > this.hiRest(nm, left)) { continue; }
+      }
+      this.grid[idx] = d;
+      this.rowMask[r] = this.rowMask[r] | bit;
+      this.colMask[c] = this.colMask[c] | bit;
+      this.boxMask[b] = this.boxMask[b] | bit;
+      this.cageMask[g] = nm;
+      this.cageAcc[g] = acc;
+      this.cageLeft[g] = left;
+      this.search(idx + 1);
+      this.grid[idx] = 0;
+      this.rowMask[r] = this.rowMask[r] - bit;
+      this.colMask[c] = this.colMask[c] - bit;
+      this.boxMask[b] = this.boxMask[b] - bit;
+      this.cageMask[g] = this.cageMask[g] - bit;
+      this.cageAcc[g] = this.cageAcc[g] - d;
+      this.cageLeft[g] = this.cageLeft[g] + 1;
+    }
+  }
+}
+
+/** Solve one fully-specified cage map, counting solutions up to `cap`. */
+export Solver runSolve(i32 n, i32 bw, i32 bh, i32 nCages, i32[] cageOf, i32[] sums, i32 cap) {
+  i32 cells = n * n;
+  i32[] left = i32[nCages]();
+  for (i32 i = 0; i < cells; i++) { left[cageOf[i]] = left[cageOf[i]] + 1; }
+  Solver s = Solver(n, bw, bh, cageOf, sums, i32[cells](), i32[n](), i32[n](), i32[n](),
+                    i32[nCages](), i32[nCages](), left, 0, cap, i32[cells]());
+  s.search(0);
+  return s;
+}

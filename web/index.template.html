@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Killer Sudoku</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#1a1d21; --dim:#6b7280; --line:#ccd2d9;
+  --thick:#1a1d21; --cage:#2f6fd0; --tint:#eceef1; --sel:#9cc4f5; --peer:#dfeafa;
+  --same:#c3dbf8; --bad:#d92b2b; --good:#127a3d; --key:#fff; --keyb:#d3d9e0;
+  --acc:#2f6fd0;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#101418; --panel:#171c22; --ink:#e8ecf1; --dim:#8b95a1; --line:#39424d;
+    --thick:#e8ecf1; --cage:#6ea8fe; --tint:#1e242c; --sel:#3f6fae;
+    --peer:#233a56; --same:#2c4a70; --bad:#ff6b6b; --good:#4ade80; --key:#212832;
+    --keyb:#333c46; --acc:#6ea8fe;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);color:var(--ink);
+  font:16px/1.4 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  display:flex;flex-direction:column;align-items:center;
+  padding:max(8px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom));
+  overscroll-behavior:none;touch-action:manipulation;
+}
+.wrap{width:100%;max-width:460px;display:flex;flex-direction:column;gap:10px;flex:1}
+
+/* ---- header ---- */
+header{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
+#timer{font-variant-numeric:tabular-nums;color:var(--dim);font-size:14px}
+
+.seedbar{display:flex;gap:6px}
+.seedbar input{
+  flex:1;min-width:0;padding:11px 12px;border:1px solid var(--keyb);border-radius:10px;
+  background:var(--panel);color:var(--ink);font:inherit;font-size:15px;
+}
+.seedbar input:focus{outline:2px solid var(--acc);outline-offset:-1px}
+.seedbar button{
+  padding:11px 14px;border:1px solid var(--keyb);border-radius:10px;background:var(--panel);
+  color:var(--ink);font:inherit;font-weight:600;font-size:15px;cursor:pointer;white-space:nowrap;
+}
+.seedbar button:active{background:var(--peer)}
+
+/* ---- board ---- */
+.board{position:relative;width:100%;aspect-ratio:1;background:var(--panel);
+  border:2.5px solid var(--thick);border-radius:6px;overflow:hidden;touch-action:manipulation}
+.cells{position:absolute;inset:0;display:grid;grid-template-columns:repeat(6,1fr);
+  grid-template-rows:repeat(6,1fr)}
+.cell{position:relative;display:flex;align-items:center;justify-content:center;
+  border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  font-size:clamp(20px,7.4vw,32px);font-weight:500;font-variant-numeric:tabular-nums;
+  color:var(--acc);cursor:pointer;user-select:none;transition:background .08s}
+.cell:nth-child(6n){border-right:none}
+.cell:nth-child(n+31){border-bottom:none}
+.cell:where(.tint){background:var(--tint)}
+.cell.bw{box-shadow:inset -2px 0 0 0 var(--thick)}
+.cell.bh{box-shadow:inset 0 -2px 0 0 var(--thick)}
+.cell.bw.bh{box-shadow:inset -2px 0 0 0 var(--thick),inset 0 -2px 0 0 var(--thick)}
+.cell.peer{background:var(--peer)}
+.cell.same{background:var(--same)}
+.cell.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--acc)}
+.cell.sel.bw{box-shadow:inset 0 0 0 2px var(--acc),inset -2px 0 0 0 var(--thick)}
+.cell.sel.bh{box-shadow:inset 0 0 0 2px var(--acc),inset 0 -2px 0 0 var(--thick)}
+.cell.sel.bw.bh{box-shadow:inset 0 0 0 2px var(--acc),inset -2px 0 0 0 var(--thick),inset 0 -2px 0 0 var(--thick)}
+.cell.bad{color:var(--bad)}
+.cell .n{position:absolute;inset:31% 5% 5%;display:grid;
+  grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
+  font-size:clamp(7px,2.4vw,10px);font-weight:600;color:var(--dim);line-height:1;pointer-events:none}
+.cell .n span{display:flex;align-items:center;justify-content:center}
+svg.cages{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+svg.cages line{stroke:var(--cage);stroke-width:3;stroke-dasharray:10 7;stroke-linecap:round}
+svg.cages text{fill:var(--cage);font:600 23px ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+.board.done{border-color:var(--good)}
+
+/* ---- pad ---- */
+.pad{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.pad button{
+  position:relative;aspect-ratio:1;min-height:46px;border:1px solid var(--keyb);border-radius:11px;
+  background:var(--key);color:var(--ink);font:inherit;font-size:clamp(19px,6vw,26px);font-weight:550;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+.pad button:active{background:var(--peer)}
+.pad button.spent{color:var(--dim);opacity:.45}
+.pad button .left{position:absolute;bottom:2px;right:5px;font-size:10px;font-weight:700;color:var(--dim)}
+.pad.notemode button{color:var(--acc)}
+
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tools button{
+  padding:11px 4px;border:1px solid var(--keyb);border-radius:11px;background:var(--panel);
+  color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:46px;
+}
+.tools button:active{background:var(--peer)}
+.tools button[aria-pressed="true"]{background:var(--acc);border-color:var(--acc);color:#fff}
+.tools button:disabled{opacity:.4;cursor:default}
+
+/* ---- messages ---- */
+.msg{min-height:22px;font-size:14px;text-align:center;color:var(--dim)}
+.msg.win{color:var(--good);font-weight:650}
+.msg.warn{color:var(--bad)}
+
+.confirm{border:1px solid var(--bad);border-radius:11px;padding:12px;background:var(--panel);
+  display:none;gap:8px;flex-direction:column}
+.confirm.on{display:flex}
+.confirm p{margin:0;font-size:14px}
+.confirm .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.confirm button{padding:11px;border-radius:10px;border:1px solid var(--keyb);background:var(--panel);
+  color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+.confirm button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+
+footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Killer Sudoku <span style="color:var(--dim);font-weight:400">6×6</span></h1>
+    <span id="timer">0:00</span>
+  </header>
+
+  <div class="seedbar">
+    <input id="seed" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
+           aria-label="Puzzle seed" placeholder="seed">
+    <button id="go" type="button">New</button>
+  </div>
+
+  <div class="board" id="board">
+    <div class="cells" id="cells"></div>
+    <svg class="cages" id="cages" viewBox="0 0 600 600" aria-hidden="true"></svg>
+  </div>
+
+  <div class="pad" id="pad"></div>
+  <div class="tools">
+    <button id="notes" type="button" aria-pressed="false">✏️ Notes</button>
+    <button id="erase" type="button">⌫ Erase</button>
+    <button id="undo" type="button">↶ Undo</button>
+    <button id="reveal" type="button">👁 Reveal</button>
+  </div>
+
+  <div class="confirm" id="confirm">
+    <p><strong>Show the answer?</strong> This fills the whole grid in. You can't un-see it —
+       your progress on this puzzle is kept, but the puzzle is over.</p>
+    <div class="row">
+      <button id="cancel" type="button">Keep playing</button>
+      <button id="yes" type="button" class="danger">Show me</button>
+    </div>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <footer>Every row, column and 3×2 box holds 1–6 once.<br>
+    Dashed cages add to their corner number, no digit twice inside one.</footer>
+</div>
+
+<script type="module">
+/*__WASM_GLUE__*/
+
+/* ------------------------------------------------------------------ seeds */
+const ADJ = ["amber","ancient","arctic","bashful","blithe","bold","brisk","bronze","calm","candid",
+"cheerful","civic","clever","copper","cosmic","crimson","curious","dapper","daring","dawn","deft",
+"dizzy","dusty","eager","earnest","elder","electric","fabled","fearless","feisty","fierce","flinty",
+"fluent","frosty","gallant","gentle","gilded","glad","gleaming","golden","graceful","grand","hearty",
+"hidden","honest","humble","idle","indigo","ivory","jaunty","jolly","keen","kindly","lively","lofty",
+"lucid","lunar","marble","mellow","merry","mighty","misty","modest","noble","nimble","northern",
+"olive","opal","patient","placid","plucky","polar","prime","proud","quaint","quick","quiet","radiant",
+"rapid","restless","rosy","rugged","rustic","saffron","sage","salty","scarlet","secret","serene",
+"sharp","silent","silver","sleepy","smoky","solar","spry","stalwart","steady","stormy","sturdy",
+"sunny","swift","tawny","tender","thrifty","tidy","timid","tranquil","true","twilight","upbeat",
+"valiant","velvet","vivid","wandering","warm","watchful","western","whimsical","wily","winter","wise",
+"witty","woven","zealous","zesty"];
+const ANI = ["adder","albatross","antelope","badger","barnacle","bass","bat","bear","beaver","bison",
+"bittern","boar","bream","bullfinch","buzzard","caribou","chaffinch","cheetah","chough","cicada",
+"civet","condor","coot","cormorant","cougar","coyote","crane","cricket","crow","curlew","dingo",
+"dipper","dormouse","dove","dunlin","eagle","egret","eider","elk","falcon","ferret","finch","firefly",
+"fox","gannet","gazelle","gecko","gibbon","godwit","goose","goshawk","grebe","grouse","gull","hare",
+"harrier","hawk","heron","hoopoe","hornet","ibex","ibis","impala","jackdaw","jaguar","jay","kestrel",
+"kingfisher","kite","koala","lapwing","lark","lemur","leopard","linnet","lizard","llama","lynx",
+"magpie","mallard","marlin","marten","merlin","mink","mole","mongoose","moorhen","moose","moth",
+"newt","nightjar","nuthatch","ocelot","octopus","onager","opossum","oriole","osprey","otter","owl",
+"panther","peregrine","petrel","pheasant","pika","pipit","plover","polecat","puffin","quail","rail",
+"raven","redshank","reindeer","robin","rook","salmon","sandpiper","seal","serval","shrew","siskin",
+"skua","skylark","snipe","sparrow","starling","stoat","stork","swallow","swift","tapir","teal","tern",
+"thrush","tiger","turnstone","viper","vole","vulture","wagtail","walrus","warbler","weasel","whimbrel",
+"wigeon","wolf","wombat","woodcock","wren","yak","zebra"];
+
+const pick = a => a[(crypto.getRandomValues(new Uint32Array(1))[0]) % a.length];
+const freshSeed = () => pick(ADJ) + "-" + pick(ANI);
+
+/** FNV-1a, so a given phrase always makes the same puzzle on any device. */
+function hash(s){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h | 0;
+}
+
+/* ------------------------------------------------------- puzzle rendering */
+const N = 6, BW = 3, BH = 2, CELLS = N * N, S = 100, D = 8;
+const boxOf = i => ((i / N | 0) / BH | 0) * (N / BW) + ((i % N) / BW | 0);
+
+/** True when `side` of cell `i` leaves its cage. 0 top, 1 right, 2 bottom, 3 left. */
+function bnd(cage, i, side){
+  const r = i / N | 0, c = i % N;
+  if (side === 0) return r === 0        || cage[i - N] !== cage[i];
+  if (side === 1) return c === N - 1    || cage[i + 1] !== cage[i];
+  if (side === 2) return r === N - 1    || cage[i + N] !== cage[i];
+  return               c === 0          || cage[i - 1] !== cage[i];
+}
+
+/*
+ * One line per maximal straight run of boundary edges rather than one box per cell: a per-cell
+ * outline leaves a gap wherever two cells of the same cage meet, which reads as a broken cage.
+ * A run's ends are nudged inward or outward by the inset so the corners close, and the run that
+ * starts at a cage's anchor starts late, cutting a notch for the total to sit in.
+ */
+function cageSvg(cage, sums){
+  const anchor = new Array(sums.length).fill(-1);
+  for (let i = 0; i < CELLS; i++) if (anchor[cage[i]] < 0) anchor[cage[i]] = i;
+  const NW = 37, NH = 26;          // the notch the total sits in
+  let out = "";
+  for (const side of [0, 2]){
+    for (let r = 0; r < N; r++){
+      let c = 0;
+      while (c < N){
+        const i = r * N + c;
+        if (!bnd(cage, i, side)){ c++; continue; }
+        let c2 = c;
+        while (c2 + 1 < N && cage[r * N + c2 + 1] === cage[i] && bnd(cage, r * N + c2 + 1, side)) c2++;
+        const y  = side === 0 ? r * S + D : (r + 1) * S - D;
+        let  x1  = bnd(cage, i, 3) ? c * S + D : c * S - D;
+        if (side === 0 && i === anchor[cage[i]]) x1 = c * S + D + NW;
+        const x2 = bnd(cage, r * N + c2, 1) ? (c2 + 1) * S - D : (c2 + 1) * S + D;
+        if (x2 > x1) out += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/>`;
+        c = c2 + 1;
+      }
+    }
+  }
+  for (const side of [1, 3]){
+    for (let c = 0; c < N; c++){
+      let r = 0;
+      while (r < N){
+        const i = r * N + c;
+        if (!bnd(cage, i, side)){ r++; continue; }
+        let r2 = r;
+        while (r2 + 1 < N && cage[(r2 + 1) * N + c] === cage[i] && bnd(cage, (r2 + 1) * N + c, side)) r2++;
+        const x  = side === 3 ? c * S + D : (c + 1) * S - D;
+        let  y1  = bnd(cage, i, 0) ? r * S + D : r * S - D;
+        if (side === 3 && i === anchor[cage[i]]) y1 = r * S + D + NH;
+        const y2 = bnd(cage, r2 * N + c, 2) ? (r2 + 1) * S - D : (r2 + 1) * S + D;
+        if (y2 > y1) out += `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}"/>`;
+        r = r2 + 1;
+      }
+    }
+  }
+  for (let k = 0; k < sums.length; k++){
+    const i = anchor[k], r = i / N | 0, c = i % N;
+    out += `<text x="${c * S + 9}" y="${r * S + 28}">${sums[k]}</text>`;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ state */
+const $ = id => document.getElementById(id);
+let cage = null, sums = null, solution = null;   // solution stays in here and is never rendered
+let val = null, notes = null, undoStack = [], sel = -1, noteMode = false, revealed = false;
+let seedText = "", t0 = 0, ticking = false, elapsed = 0;
+
+const cellEls = [];
+for (let i = 0; i < CELLS; i++){
+  const d = document.createElement("div");
+  d.className = "cell";
+  const box = boxOf(i), c = i % N, r = i / N | 0;
+  if ((box % 2) ^ ((box / (N / BW) | 0) % 2)) d.classList.add("tint");
+  if (c % BW === BW - 1 && c !== N - 1) d.classList.add("bw");
+  if (r % BH === BH - 1 && r !== N - 1) d.classList.add("bh");
+  d.innerHTML = `<span class="v"></span><span class="n"></span>`;
+  d.addEventListener("pointerdown", e => { e.preventDefault(); select(i); });
+  $("cells").appendChild(d);
+  cellEls.push(d);
+}
+
+/* --------------------------------------------------------- rules, no peeking
+ * Everything below judges the grid against the rules of the puzzle alone. None of it reads
+ * `solution`, so a highlighted mistake never tells you what the right digit was — only that what
+ * is on the board cannot stand. The one place `solution` is read is reveal(), behind a confirm.
+ */
+function conflicts(){
+  const bad = new Set();
+  const seen = (get) => {
+    for (let g = 0; g < N; g++){
+      const at = new Map();
+      for (let k = 0; k < N; k++){
+        const i = get(g, k), v = val[i];
+        if (!v) continue;
+        if (at.has(v)){ bad.add(i); bad.add(at.get(v)); } else at.set(v, i);
+      }
+    }
+  };
+  seen((g, k) => g * N + k);                                    // rows
+  seen((g, k) => k * N + g);                                    // columns
+  seen((g, k) => (((g / (N / BW) | 0) * BH + (k / BW | 0)) * N)  // boxes
+                 + (g % (N / BW)) * BW + k % BW);
+
+  const members = sums.map(() => []);
+  for (let i = 0; i < CELLS; i++) members[cage[i]].push(i);
+  for (let k = 0; k < sums.length; k++){
+    const m = members[k], at = new Map();
+    let acc = 0, filled = 0;
+    for (const i of m){
+      const v = val[i];
+      if (!v) continue;
+      filled++; acc += v;
+      if (at.has(v)){ bad.add(i); bad.add(at.get(v)); } else at.set(v, i);
+    }
+    const over = acc > sums[k], wrong = filled === m.length && acc !== sums[k];
+    if (over || wrong) for (const i of m) if (val[i]) bad.add(i);
+  }
+  return bad;
+}
+
+function draw(){
+  const bad = conflicts();
+  const selV = sel >= 0 ? val[sel] : 0;
+  const selR = sel >= 0 ? sel / N | 0 : -1, selC = sel >= 0 ? sel % N : -1;
+  const selB = sel >= 0 ? boxOf(sel) : -1;
+  for (let i = 0; i < CELLS; i++){
+    const el = cellEls[i], v = val[i];
+    el.classList.toggle("sel",  i === sel);
+    el.classList.toggle("peer", i !== sel && sel >= 0 &&
+      ((i / N | 0) === selR || i % N === selC || boxOf(i) === selB));
+    el.classList.toggle("same", i !== sel && !!v && v === selV);
+    el.classList.toggle("bad",  bad.has(i));
+    el.firstChild.textContent = v ? v : "";
+    let n = "";
+    if (!v) for (let d = 1; d <= N; d++) n += `<span>${notes[i].has(d) ? d : ""}</span>`;
+    el.lastChild.innerHTML = n;
+  }
+  const left = new Array(N + 1).fill(N);
+  for (let i = 0; i < CELLS; i++) if (val[i]) left[val[i]]--;
+  for (let d = 1; d <= N; d++){
+    const b = $("pad").children[d - 1];
+    b.classList.toggle("spent", left[d] <= 0);
+    b.lastChild.textContent = left[d] > 0 ? left[d] : "";
+  }
+  $("undo").disabled = undoStack.length === 0;
+  const full = val.every(v => v > 0);
+  const won = full && bad.size === 0;
+  $("board").classList.toggle("done", won);
+  if (won){ stop(); $("msg").className = "msg win";
+    $("msg").textContent = revealed ? "Solved — with the answer shown." : `Solved in ${clock()}. 🎉`; }
+  else if (bad.size){ $("msg").className = "msg warn"; $("msg").textContent = "Something clashes."; }
+  else { $("msg").className = "msg"; $("msg").textContent = full ? "" : ""; }
+  save();
+}
+
+/* --------------------------------------------------------------- editing */
+function select(i){ sel = i; start(); draw(); }
+
+function push(i){ undoStack.push({ i, v: val[i], n: new Set(notes[i]) }); }
+
+function place(d){
+  if (sel < 0 || revealed) return;
+  start();
+  if (noteMode){
+    if (val[sel]) return;
+    push(sel);
+    notes[sel].has(d) ? notes[sel].delete(d) : notes[sel].add(d);
+  } else {
+    if (val[sel] === d){ push(sel); val[sel] = 0; }
+    else {
+      push(sel);
+      val[sel] = d; notes[sel].clear();
+      const r = sel / N | 0, c = sel % N, b = boxOf(sel), g = cage[sel];
+      for (let i = 0; i < CELLS; i++)
+        if (i !== sel && notes[i].has(d) &&
+            ((i / N | 0) === r || i % N === c || boxOf(i) === b || cage[i] === g)){
+          push(i); notes[i].delete(d);
+        }
+    }
+  }
+  draw();
+}
+
+function erase(){
+  if (sel < 0 || revealed || (!val[sel] && notes[sel].size === 0)) return;
+  push(sel); val[sel] = 0; notes[sel].clear(); draw();
+}
+
+function undo(){
+  if (!undoStack.length) return;
+  const u = undoStack.pop();
+  val[u.i] = u.v; notes[u.i] = u.n; sel = u.i;
+  draw();
+}
+
+/* ---------------------------------------------------------------- timing */
+const clock = () => {
+  const s = Math.floor(elapsed / 1000);
+  return `${s / 60 | 0}:${String(s % 60).padStart(2, "0")}`;
+};
+function start(){ if (!ticking && !revealed){ ticking = true; t0 = Date.now(); } }
+function stop(){ if (ticking){ elapsed += Date.now() - t0; ticking = false; } }
+setInterval(() => {
+  const now = elapsed + (ticking ? Date.now() - t0 : 0);
+  const s = Math.floor(now / 1000);
+  $("timer").textContent = `${s / 60 | 0}:${String(s % 60).padStart(2, "0")}`;
+}, 500);
+
+/* ----------------------------------------------------------- persistence */
+const key = () => "ks6:" + seedText;
+function save(){
+  if (!cage) return;
+  try {
+    localStorage.setItem(key(), JSON.stringify({
+      v: Array.from(val), n: notes.map(s => Array.from(s)),
+      e: elapsed + (ticking ? Date.now() - t0 : 0), r: revealed,
+    }));
+  } catch (e) { /* private mode; the puzzle still works, it just will not come back */ }
+}
+function load(){
+  try {
+    const raw = localStorage.getItem(key());
+    if (!raw) return false;
+    const o = JSON.parse(raw);
+    if (!Array.isArray(o.v) || o.v.length !== CELLS) return false;
+    val = o.v.slice(); notes = o.n.map(a => new Set(a));
+    elapsed = o.e || 0; revealed = !!o.r;
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ------------------------------------------------------------- new puzzle */
+function build(text){
+  seedText = text.trim().toLowerCase().replace(/\s+/g, "-") || freshSeed();
+  $("seed").value = seedText;
+  location.hash = encodeURIComponent(seedText);
+
+  const a = generate(hash(seedText));
+  const nc = a[0];
+  cage     = Array.from(a.slice(1, 1 + CELLS));
+  sums     = Array.from(a.slice(1 + CELLS, 1 + CELLS + nc));
+  solution = Array.from(a.slice(1 + CELLS + nc));
+
+  val = new Array(CELLS).fill(0);
+  notes = Array.from({ length: CELLS }, () => new Set());
+  undoStack = []; sel = -1; revealed = false; elapsed = 0; ticking = false;
+  load();
+  $("cages").innerHTML = cageSvg(cage, sums);
+  $("confirm").classList.remove("on");
+  draw();
+}
+
+function reveal(){
+  stop();
+  revealed = true;
+  for (let i = 0; i < CELLS; i++){ val[i] = solution[i]; notes[i].clear(); }
+  undoStack = []; sel = -1;
+  $("confirm").classList.remove("on");
+  draw();
+}
+
+/* ------------------------------------------------------------------ wiring */
+for (let d = 1; d <= N; d++){
+  const b = document.createElement("button");
+  b.type = "button";
+  b.innerHTML = `${d}<span class="left"></span>`;
+  b.addEventListener("click", () => place(d));
+  $("pad").appendChild(b);
+}
+$("go").addEventListener("click", () => build($("seed").value || freshSeed()));
+$("seed").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); $("go").click(); }});
+$("notes").addEventListener("click", () => {
+  noteMode = !noteMode;
+  $("notes").setAttribute("aria-pressed", String(noteMode));
+  $("pad").classList.toggle("notemode", noteMode);
+});
+$("erase").addEventListener("click", erase);
+$("undo").addEventListener("click", undo);
+$("reveal").addEventListener("click", () => {
+  if (revealed) return;
+  $("confirm").classList.toggle("on");
+  $("confirm").scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
+$("cancel").addEventListener("click", () => $("confirm").classList.remove("on"));
+$("yes").addEventListener("click", reveal);
+
+addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key >= "1" && e.key <= "6"){ place(+e.key); e.preventDefault(); return; }
+  if (e.key === "Backspace" || e.key === "Delete" || e.key === "0"){ erase(); e.preventDefault(); return; }
+  if (e.key === "n" || e.key === "N"){ $("notes").click(); return; }
+  if (e.key === "u" || e.key === "U"){ undo(); return; }
+  const mv = { ArrowUp: -N, ArrowDown: N, ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (mv !== undefined){
+    e.preventDefault();
+    if (sel < 0) select(0);
+    else {
+      const c = sel % N;
+      if ((mv === -1 && c === 0) || (mv === 1 && c === N - 1)) return;
+      const t = sel + mv;
+      if (t >= 0 && t < CELLS) select(t);
+    }
+  }
+});
+addEventListener("hashchange", () => {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h && h !== seedText) build(h);
+});
+addEventListener("pagehide", () => { stop(); save(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); } });
+
+build(decodeURIComponent(location.hash.slice(1)) || freshSeed());
+</script>
+</body>
+</html>

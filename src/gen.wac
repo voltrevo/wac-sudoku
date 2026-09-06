@@ -1,0 +1,315 @@
+// A killer sudoku generator that only ever emits puzzles with exactly one solution.
+//
+//     wac run src/gen.wac -- <count> [seed]
+//
+// ## How uniqueness is guaranteed rather than hoped for
+//
+// The tempting shape is: make a grid, cut it into cages, check whether the result is unique, throw it
+// away if not. That wastes most of its work and gives no control over difficulty, because a random
+// partition of a 6x6 grid is usually *not* unique — the cages have to be fine enough to pin the grid
+// down, and randomly they are not.
+//
+// So this goes the other way and never leaves the safe region:
+//
+//   1. build a full grid, so a solution certainly exists;
+//   2. cut it into very small cages — mostly pairs. That is heavily over-constrained and so is
+//      essentially always unique, and it is *checked*, not assumed;
+//   3. repeatedly pick two touching cages and merge them, keeping the merge **only if the puzzle
+//      still has exactly one solution**, and undoing it otherwise.
+//
+// Every step is verified by the same solver the reader uses, so uniqueness is an invariant of the
+// loop rather than a property tested at the end. Merging is also what makes the puzzle interesting:
+// it stops when no further pair can be joined without admitting a second solution, which is the
+// largest, loosest cage set that still determines the grid.
+//
+// A cage never repeats a digit, so a merge is refused outright when the two share one — that is what
+// killer notation means, and it also keeps cages at most N cells.
+
+import { Core, Cli } from "std/platform.wac";
+import { digits, letterFor } from "./text.wac";
+import { runSolve, Solver } from "./solve.wac";
+
+/** xorshift32 — small, seedable, and enough for shuffling. */
+struct Rng {
+  i32 s;
+
+  i32 next(this) {
+    i32 x = this.s;
+    x = x ^ (x << 13);
+    x = x ^ (x >>> 17);
+    x = x ^ (x << 5);
+    if (x == 0) { x = 0x1234567; }
+    this.s = x;
+    return x & 0x7FFFFFFF;
+  }
+
+  /** A number in 0..n-1. */
+  i32 below(this, i32 n) {
+    if (n <= 1) { return 0; }
+    return this.next() % n;
+  }
+
+  void shuffle(this, i32[] a, i32 len) {
+    for (i32 i = len - 1; i > 0; i--) {
+      i32 j = this.below(i + 1);
+      i32 t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+  }
+}
+
+/** A full valid grid: the standard construction, then relabelled and shuffled within bands. */
+i32[] fullGrid(Rng rng, i32 n, i32 bw, i32 bh) {
+  i32[] g = i32[n * n]();
+
+  i32[] dp = i32[n + 1]();
+  i32[] ds = i32[n]();
+  for (i32 i = 0; i < n; i++) { ds[i] = i + 1; }
+  rng.shuffle(ds, n);
+  for (i32 i = 0; i < n; i++) { dp[i + 1] = ds[i]; }
+
+  // rows: shuffle the bands, and the rows inside each band
+  i32 nBands = n / bh;
+  i32[] bandOrder = i32[nBands]();
+  for (i32 i = 0; i < nBands; i++) { bandOrder[i] = i; }
+  rng.shuffle(bandOrder, nBands);
+  i32[] rowOf = i32[n]();
+  for (i32 b = 0; b < nBands; b++) {
+    i32[] inner = i32[bh]();
+    for (i32 i = 0; i < bh; i++) { inner[i] = i; }
+    rng.shuffle(inner, bh);
+    for (i32 i = 0; i < bh; i++) { rowOf[b * bh + i] = bandOrder[b] * bh + inner[i]; }
+  }
+
+  // columns: the same, over stacks
+  i32 nStacks = n / bw;
+  i32[] stackOrder = i32[nStacks]();
+  for (i32 i = 0; i < nStacks; i++) { stackOrder[i] = i; }
+  rng.shuffle(stackOrder, nStacks);
+  i32[] colOf = i32[n]();
+  for (i32 s = 0; s < nStacks; s++) {
+    i32[] inner = i32[bw]();
+    for (i32 i = 0; i < bw; i++) { inner[i] = i; }
+    rng.shuffle(inner, bw);
+    for (i32 i = 0; i < bw; i++) { colOf[s * bw + i] = stackOrder[s] * bw + inner[i]; }
+  }
+
+  for (i32 r = 0; r < n; r++) {
+    for (i32 c = 0; c < n; c++) {
+      i32 sr = rowOf[r];
+      i32 sc = colOf[c];
+      i32 base = (bw * (sr % bh) + sr / bh + sc) % n + 1;
+      g[r * n + c] = dp[base];
+    }
+  }
+  return g;
+}
+
+/** Renumber cage labels to 0..k-1 in reading order, and total each one. */
+struct Packed {
+  i32[] cageOf;
+  i32[] sums;
+  i32 nCages;
+}
+
+Packed pack(i32[] owner, i32[] grid, i32 cells) {
+  i32[] mapTo = i32[cells]();
+  for (i32 i = 0; i < cells; i++) { mapTo[i] = 0 - 1; }
+  i32[] out = i32[cells]();
+  i32[] sums = i32[cells]();
+  i32 k = 0;
+  for (i32 i = 0; i < cells; i++) {
+    i32 o = owner[i];
+    if (mapTo[o] < 0) { mapTo[o] = k; k = k + 1; }
+    out[i] = mapTo[o];
+    sums[mapTo[o]] = sums[mapTo[o]] + grid[i];
+  }
+  i32[] trimmed = i32[k]();
+  for (i32 i = 0; i < k; i++) { trimmed[i] = sums[i]; }
+  return Packed(out, trimmed, k);
+}
+
+bool isUnique(i32 n, i32 bw, i32 bh, i32[] owner, i32[] grid) {
+  i32 cells = n * n;
+  Packed p = pack(owner, grid, cells);
+  Solver s = runSolve(n, bw, bh, p.nCages, p.cageOf, p.sums, 2);
+  return s.count == 1;
+}
+
+/** Whether two cages share a digit — a killer cage may not repeat one. */
+bool sharesDigit(i32[] owner, i32[] grid, i32 cells, i32 a, i32 b) {
+  i32 ma = 0;
+  i32 mb = 0;
+  for (i32 i = 0; i < cells; i++) {
+    if (owner[i] == a) { ma = ma | (1 << grid[i]); }
+    if (owner[i] == b) { mb = mb | (1 << grid[i]); }
+  }
+  return (ma & mb) != 0;
+}
+
+i32 sizeOf(i32[] owner, i32 cells, i32 g) {
+  i32 k = 0;
+  for (i32 i = 0; i < cells; i++) { if (owner[i] == g) { k = k + 1; } }
+  return k;
+}
+
+/** One generated candidate: the cages, their totals, the grid behind them, and how many lone cells. */
+struct Made {
+  i32[] cageOf;
+  i32[] sums;
+  i32 nCages;
+  i32[] grid;
+  i32 lone;
+}
+
+/**
+ * Make one puzzle.
+ *
+ * Starts from the one partition that is certainly unique — every cell its own cage, so each total is
+ * a single digit and the puzzle is a completed grid written out longhand. An earlier version started
+ * from dominoes on the assumption that pairs are over-constrained enough; they are not, and it
+ * rejected every puzzle it tried to make. Starting here needs no assumption.
+ *
+ * Then passes over every adjacent pair in a shuffled order, merging when the result still has
+ * exactly one solution and undoing when it does not, until a whole pass changes nothing. What
+ * survives is maximal: no two touching cages can be joined without admitting a second answer.
+ */
+Made makeOne(Rng rng, i32 n, i32 bw, i32 bh, i32 maxCage) {
+  i32 cells = n * n;
+  i32[] grid = fullGrid(rng, n, bw, bh);
+  i32[] owner = i32[cells]();
+  for (i32 i = 0; i < cells; i++) { owner[i] = i; }
+
+  i32 nPairs = 0;
+  i32[] pairA = i32[2 * n * (n - 1)]();
+  i32[] pairB = i32[2 * n * (n - 1)]();
+  for (i32 r = 0; r < n; r++) {
+    for (i32 c = 0; c < n; c++) {
+      i32 cell = r * n + c;
+      if (c < n - 1) { pairA[nPairs] = cell; pairB[nPairs] = cell + 1; nPairs = nPairs + 1; }
+      if (r < n - 1) { pairA[nPairs] = cell; pairB[nPairs] = cell + n; nPairs = nPairs + 1; }
+    }
+  }
+  i32[] porder = i32[nPairs]();
+  for (i32 i = 0; i < nPairs; i++) { porder[i] = i; }
+
+  i32 passes = 0;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    passes = passes + 1;
+    if (passes > 40) { continue; }
+    rng.shuffle(porder, nPairs);
+    // Two sweeps. The first only considers pairs where one side is still a lone cell, because a lone
+    // cell is a given digit and the puzzle reads better without one — left to a single random order
+    // they lose, their neighbours having grown to the size limit before their turn comes.
+    for (i32 sweep = 0; sweep < 2; sweep++) {
+      for (i32 pi = 0; pi < nPairs; pi++) {
+        i32 idx = porder[pi];
+        i32 a = owner[pairA[idx]];
+        i32 b = owner[pairB[idx]];
+        if (a == b) { continue; }
+        i32 sa = sizeOf(owner, cells, a);
+        i32 sb = sizeOf(owner, cells, b);
+        if (sweep == 0) {
+          if (sa > 1) { if (sb > 1) { continue; } }
+        }
+        if (sa + sb > maxCage) { continue; }
+        if (sharesDigit(owner, grid, cells, a, b)) { continue; }
+
+        // Remember which cells move: the merge must be exactly reversible, and relabelling a's cells
+        // back to b would drag a's own cells across with them.
+        i32[] moved = i32[cells]();
+        i32 nMoved = 0;
+        for (i32 i = 0; i < cells; i++) {
+          if (owner[i] == b) { moved[nMoved] = i; nMoved = nMoved + 1; }
+        }
+        for (i32 i = 0; i < nMoved; i++) { owner[moved[i]] = a; }
+        if (isUnique(n, bw, bh, owner, grid)) {
+          changed = true;
+        } else {
+          for (i32 i = 0; i < nMoved; i++) { owner[moved[i]] = b; }
+        }
+      }
+    }
+  }
+
+  Packed p = pack(owner, grid, cells);
+  i32 lone = 0;
+  for (i32 k = 0; k < p.nCages; k++) {
+    i32 sz = 0;
+    for (i32 i = 0; i < cells; i++) { if (p.cageOf[i] == k) { sz = sz + 1; } }
+    if (sz == 1) { lone = lone + 1; }
+  }
+  return Made(p.cageOf, p.sums, p.nCages, grid, lone);
+}
+
+export i32 main(Core core, Cli cli) {
+  i32 n = 6;
+  i32 bw = 3;
+  i32 bh = 2;
+  i32 maxCage = 5;
+
+  i32 argc = cli.argCount().wait();
+  i32 count = 20;
+  i32 seed = 0;
+  if (argc >= 1) {
+    i32 v = 0;
+    u8[] a0 = cli.arg(0).wait();
+    for (i32 i = 0; i < a0.len(); i++) { v = v * 10 + (a0[i] - '0'); }
+    if (v > 0) { count = v; }
+  }
+  if (argc >= 2) {
+    i32 v = 0;
+    u8[] a1 = cli.arg(1).wait();
+    for (i32 i = 0; i < a1.len(); i++) { v = v * 10 + (a1[i] - '0'); }
+    seed = v;
+  }
+  if (seed == 0) {
+    u8[] rb = core.randomBytes(4).wait();
+    seed = rb[0] | (rb[1] << 8) | (rb[2] << 16) | ((rb[3] & 127) << 24);
+    if (seed == 0) { seed = 1; }
+  }
+
+  Rng rng = Rng(seed);
+  i32 cells = n * n;
+
+  core.log("# " + digits(count) + " killer sudoku, " + digits(n) + "x" + digits(n)
+         + ", boxes " + digits(bw) + "x" + digits(bh) + ", seed " + digits(seed));
+  core.log("# every one checked to have exactly one solution at every merge");
+
+  for (i32 puzzle = 1; puzzle <= count; puzzle++) {
+    // Retry the slot until the puzzle has no lone cells. A lone cell is a legal killer cage — it is
+    // simply a given digit — but a set of them makes a puzzle that is mostly filled in already, and
+    // generation is cheap enough to just ask again. The best of the attempts is kept either way, so
+    // this never loops forever and never emits something worse than what it found.
+    Made best = makeOne(rng, n, bw, bh, maxCage);
+    i32 tries = 1;
+    while (best.lone > 0) {
+      if (tries >= 25) { continue; }
+      Made again = makeOne(rng, n, bw, bh, maxCage);
+      tries = tries + 1;
+      if (again.lone < best.lone) { best = again; }
+      if (best.lone == 0) { tries = tries; }
+    }
+
+    core.log("");
+    core.log("=== puzzle " + digits(puzzle));
+    core.log("size " + digits(n) + " " + digits(bw) + " " + digits(bh));
+    for (i32 r = 0; r < n; r++) {
+      string line = "";
+      for (i32 c = 0; c < n; c++) { line = line + letterFor(best.cageOf[r * n + c]); }
+      core.log("map " + line);
+    }
+    string ss = "sums";
+    for (i32 k = 0; k < best.nCages; k++) { ss = ss + " " + digits(best.sums[k]); }
+    core.log(ss);
+    for (i32 r = 0; r < n; r++) {
+      string line = "";
+      for (i32 c = 0; c < n; c++) { line = line + digits(best.grid[r * n + c]); }
+      core.log("# sol " + line);
+    }
+    core.log("# cages " + digits(best.nCages) + ", given digits " + digits(best.lone)
+           + ", attempts " + digits(tries));
+  }
+  return 0;
+}

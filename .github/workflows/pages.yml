@@ -1,0 +1,66 @@
+# Build the single-file app and publish it to GitHub Pages.
+#
+# The build is `./bootstrap.sh --verify` — the same command as on a laptop. Nothing here knows how
+# to build the site; if this workflow and a local run ever disagree, the disagreement is in the
+# environment rather than in two descriptions of the same steps that drifted apart.
+#
+# Enable this once under Settings -> Pages -> Source -> GitHub Actions.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it: a half-published site is worse than a
+# slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The compiler is built from source, so this is the only slow step — about 50s cold. Keyed on
+      # the pinned ref, so it rebuilds when, and only when, that moves.
+      - name: Read the pinned wac ref
+        id: wac
+        run: echo "ref=$(cat wac-ref.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the bootstrapped compiler
+        uses: actions/cache@v4
+        with:
+          path: .wac
+          key: wac-nodejs-${{ runner.os }}-${{ steps.wac.outputs.ref }}
+
+      - name: Build and verify
+        env:
+          WAC_REF: ${{ steps.wac.outputs.ref }}
+        run: ./bootstrap.sh --verify
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
