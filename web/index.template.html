@@ -44,7 +44,7 @@ h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
 }
 .seedbar input:focus{outline:2px solid var(--acc);outline-offset:-1px}
 .seedbar button{
-  padding:11px 14px;border:1px solid var(--keyb);border-radius:10px;background:var(--panel);
+  flex:0 0 auto;padding:11px 12px;border:1px solid var(--keyb);border-radius:10px;background:var(--panel);
   color:var(--ink);font:inherit;font-weight:600;font-size:15px;cursor:pointer;white-space:nowrap;
 }
 .seedbar button:active{background:var(--peer)}
@@ -92,11 +92,14 @@ svg.cages text{fill:var(--cage);font:600 23px ui-sans-serif,-apple-system,"Segoe
 .pad button .left{position:absolute;bottom:2px;right:5px;font-size:10px;font-weight:700;color:var(--dim)}
 .pad.notemode button{color:var(--acc)}
 
-.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tools{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 .tools button{
-  padding:11px 4px;border:1px solid var(--keyb);border-radius:11px;background:var(--panel);
-  color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:46px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  padding:7px 2px;border:1px solid var(--keyb);border-radius:11px;background:var(--panel);
+  color:var(--ink);font:inherit;cursor:pointer;min-height:48px;
 }
+.tools button i{font-style:normal;font-size:15px;line-height:1}
+.tools button b{font-size:11px;font-weight:650;letter-spacing:.1px}
 .tools button:active{background:var(--peer)}
 .tools button[aria-pressed="true"]{background:var(--acc);border-color:var(--acc);color:#fff}
 .tools button:disabled{opacity:.4;cursor:default}
@@ -126,9 +129,10 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
   </header>
 
   <div class="seedbar">
+    <button id="prev" type="button">‹&nbsp;Prev</button>
     <input id="seed" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
            aria-label="Puzzle seed" placeholder="seed">
-    <button id="go" type="button">New</button>
+    <button id="next" type="button">Next&nbsp;›</button>
   </div>
 
   <div class="board" id="board">
@@ -138,10 +142,11 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
 
   <div class="pad" id="pad"></div>
   <div class="tools">
-    <button id="notes" type="button" aria-pressed="false">✏️ Notes</button>
-    <button id="erase" type="button">⌫ Erase</button>
-    <button id="undo" type="button">↶ Undo</button>
-    <button id="reveal" type="button">👁 Reveal</button>
+    <button id="notes" type="button" aria-pressed="false"><i>✏️</i><b>Notes</b></button>
+    <button id="erase" type="button"><i>⌫</i><b>Erase</b></button>
+    <button id="undo" type="button"><i>↶</i><b>Undo</b></button>
+    <button id="clear" type="button"><i>✕</i><b>Clear</b></button>
+    <button id="reveal" type="button"><i>👁</i><b>Reveal</b></button>
   </div>
 
   <div class="confirm" id="confirm">
@@ -190,7 +195,16 @@ const ANI = ["adder","albatross","antelope","badger","barnacle","bass","bat","be
 "wigeon","wolf","wombat","woodcock","wren","yak","zebra"];
 
 const pick = a => a[(crypto.getRandomValues(new Uint32Array(1))[0]) % a.length];
-const freshSeed = () => pick(ADJ) + "-" + pick(ANI);
+const freshName = () => pick(ADJ) + "-" + pick(ANI);
+
+/* A seed is a name and a two-digit number — `brisk-otter-07`. A seed typed without one *is* that
+ * name at -00, so Next and Prev always have somewhere to go. They wrap, which is why Prev from
+ * -00 lands on -99 rather than refusing: a hundred puzzles per name, in a ring. */
+const SUFFIX = /-(\d{2})$/;
+const splitSeed = t => { const m = SUFFIX.exec(t);
+  return m ? { base: t.slice(0, -3), n: +m[1] } : { base: t, n: 0 }; };
+const seedName = (base, n) =>
+  `${base}-${String(((n % 100) + 100) % 100).padStart(2, "0")}`;
 
 /** FNV-1a, so a given phrase always makes the same puzzle on any device. */
 function hash(s){
@@ -267,7 +281,8 @@ function cageSvg(cage, sums){
 /* ------------------------------------------------------------------ state */
 const $ = id => document.getElementById(id);
 let cage = null, sums = null, solution = null;   // solution stays in here and is never rendered
-let val = null, notes = null, undoStack = [], sel = -1, noteMode = false, revealed = false;
+let val = null, notes = null, undoStack = [], batch = null, sel = -1,
+    noteMode = false, revealed = false;
 let seedText = "", t0 = 0, ticking = false, elapsed = 0;
 
 const cellEls = [];
@@ -361,40 +376,65 @@ function draw(){
 /* --------------------------------------------------------------- editing */
 function select(i){ sel = i; start(); draw(); }
 
-function push(i){ undoStack.push({ i, v: val[i], n: new Set(notes[i]) }); }
+/* One user action is one undo, however many cells it moved. Committing a digit also rubs that
+ * digit out of its peers' pencil marks, and those used to be separate entries — so undoing a
+ * placement put one peer's note back and left the digit sitting there. */
+function begin(){ batch = []; }
+function touch(i){ if (batch) batch.push({ i, v: val[i], n: new Set(notes[i]) }); }
+function commit(){
+  if (batch && batch.length) undoStack.push(batch);
+  batch = null;
+}
 
 function place(d){
   if (sel < 0 || revealed) return;
   start();
+  begin();
   if (noteMode){
-    if (val[sel]) return;
-    push(sel);
+    if (val[sel]) { batch = null; return; }
+    touch(sel);
     notes[sel].has(d) ? notes[sel].delete(d) : notes[sel].add(d);
+  } else if (val[sel] === d){
+    touch(sel); val[sel] = 0;
   } else {
-    if (val[sel] === d){ push(sel); val[sel] = 0; }
-    else {
-      push(sel);
-      val[sel] = d; notes[sel].clear();
-      const r = sel / N | 0, c = sel % N, b = boxOf(sel), g = cage[sel];
-      for (let i = 0; i < CELLS; i++)
-        if (i !== sel && notes[i].has(d) &&
-            ((i / N | 0) === r || i % N === c || boxOf(i) === b || cage[i] === g)){
-          push(i); notes[i].delete(d);
-        }
-    }
+    touch(sel);
+    val[sel] = d; notes[sel].clear();
+    const r = sel / N | 0, c = sel % N, b = boxOf(sel), g = cage[sel];
+    for (let i = 0; i < CELLS; i++)
+      if (i !== sel && notes[i].has(d) &&
+          ((i / N | 0) === r || i % N === c || boxOf(i) === b || cage[i] === g)){
+        touch(i); notes[i].delete(d);
+      }
   }
+  commit();
   draw();
 }
 
 function erase(){
   if (sel < 0 || revealed || (!val[sel] && notes[sel].size === 0)) return;
-  push(sel); val[sel] = 0; notes[sel].clear(); draw();
+  begin(); touch(sel); val[sel] = 0; notes[sel].clear(); commit();
+  draw();
+}
+
+/** Start this puzzle again. One undo away, clock included, so it needs no confirmation. */
+function clearAll(){
+  if (revealed) return;
+  if (!val.some(v => v) && !notes.some(n => n.size)) return;
+  begin();
+  for (let i = 0; i < CELLS; i++){ touch(i); val[i] = 0; notes[i].clear(); }
+  batch.clock = elapsed + (ticking ? Date.now() - t0 : 0);
+  commit();
+  elapsed = 0; if (ticking) t0 = Date.now();
+  draw();
 }
 
 function undo(){
   if (!undoStack.length) return;
-  const u = undoStack.pop();
-  val[u.i] = u.v; notes[u.i] = u.n; sel = u.i;
+  const b = undoStack.pop();
+  // Backwards, so a cell touched twice in one action comes back as it was before the action.
+  for (let k = b.length - 1; k >= 0; k--){ val[b[k].i] = b[k].v; notes[b[k].i] = b[k].n; }
+  if (b.clock !== undefined){ elapsed = b.clock; if (ticking) t0 = Date.now(); }
+  sel = b[0].i;
   draw();
 }
 
@@ -411,8 +451,27 @@ setInterval(() => {
   $("timer").textContent = `${s / 60 | 0}:${String(s % 60).padStart(2, "0")}`;
 }, 500);
 
-/* ----------------------------------------------------------- persistence */
-const key = () => "ks6:" + seedText;
+/* ----------------------------------------------------------- persistence
+ * Ten puzzles are kept, not just the one on screen, because Next and Prev make leaving a puzzle
+ * mid-thought the normal way to use this. Step forward, get stuck, step back — your grid is where
+ * you left it. `ks6:recent` is the order they were last opened in; the eleventh evicts the oldest,
+ * and its entry is removed rather than left behind for nobody to read. */
+const KEEP = 10;
+const INDEX = "ks6:recent";
+const key = (s = seedText) => "ks6:" + s;
+
+function recent(){
+  try { const r = JSON.parse(localStorage.getItem(INDEX)); return Array.isArray(r) ? r : []; }
+  catch (e) { return []; }
+}
+function remember(s){
+  try {
+    const list = [s, ...recent().filter(x => x !== s)];
+    for (const gone of list.slice(KEEP)) localStorage.removeItem(key(gone));
+    localStorage.setItem(INDEX, JSON.stringify(list.slice(0, KEEP)));
+  } catch (e) { /* see save() */ }
+}
+
 function save(){
   if (!cage) return;
   try {
@@ -436,7 +495,10 @@ function load(){
 
 /* ------------------------------------------------------------- new puzzle */
 function build(text){
-  seedText = text.trim().toLowerCase().replace(/\s+/g, "-") || freshSeed();
+  const typed = text.trim().toLowerCase().replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
+  let { base, n } = splitSeed(typed);
+  if (!base) base = freshName();          // "-07" on its own names no puzzle
+  seedText = seedName(base, n);
   $("seed").value = seedText;
   location.hash = encodeURIComponent(seedText);
 
@@ -448,12 +510,16 @@ function build(text){
 
   val = new Array(CELLS).fill(0);
   notes = Array.from({ length: CELLS }, () => new Set());
-  undoStack = []; sel = -1; revealed = false; elapsed = 0; ticking = false;
+  undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
   load();
+  remember(seedText);
   $("cages").innerHTML = cageSvg(cage, sums);
   $("confirm").classList.remove("on");
   draw();
 }
+
+/** Next and Prev walk the number, keeping the name. */
+function step(d){ const { base, n } = splitSeed(seedText); build(seedName(base, n + d)); }
 
 function reveal(){
   stop();
@@ -472,8 +538,11 @@ for (let d = 1; d <= N; d++){
   b.addEventListener("click", () => place(d));
   $("pad").appendChild(b);
 }
-$("go").addEventListener("click", () => build($("seed").value || freshSeed()));
-$("seed").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); $("go").click(); }});
+$("next").addEventListener("click", () => step(1));
+$("prev").addEventListener("click", () => step(-1));
+$("seed").addEventListener("keydown", e => {
+  if (e.key === "Enter"){ e.preventDefault(); $("seed").blur(); build($("seed").value); }});
+$("seed").addEventListener("blur", () => { if ($("seed").value.trim() !== seedText) build($("seed").value); });
 $("notes").addEventListener("click", () => {
   noteMode = !noteMode;
   $("notes").setAttribute("aria-pressed", String(noteMode));
@@ -481,6 +550,7 @@ $("notes").addEventListener("click", () => {
 });
 $("erase").addEventListener("click", erase);
 $("undo").addEventListener("click", undo);
+$("clear").addEventListener("click", clearAll);
 $("reveal").addEventListener("click", () => {
   if (revealed) return;
   $("confirm").classList.toggle("on");
@@ -495,6 +565,8 @@ addEventListener("keydown", e => {
   if (e.key === "Backspace" || e.key === "Delete" || e.key === "0"){ erase(); e.preventDefault(); return; }
   if (e.key === "n" || e.key === "N"){ $("notes").click(); return; }
   if (e.key === "u" || e.key === "U"){ undo(); return; }
+  if (e.key === "["){ step(-1); return; }
+  if (e.key === "]"){ step(1); return; }
   const mv = { ArrowUp: -N, ArrowDown: N, ArrowLeft: -1, ArrowRight: 1 }[e.key];
   if (mv !== undefined){
     e.preventDefault();
@@ -514,7 +586,7 @@ addEventListener("hashchange", () => {
 addEventListener("pagehide", () => { stop(); save(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); } });
 
-build(decodeURIComponent(location.hash.slice(1)) || freshSeed());
+build(decodeURIComponent(location.hash.slice(1)) || freshName());
 </script>
 </body>
 </html>

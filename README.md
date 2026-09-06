@@ -2,9 +2,13 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 39 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 43 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
+
+**[Play it](https://voltrevo.github.io/wac-sudoku/)**
+
+<img src="docs/screenshot.png" alt="A 6x6 killer sudoku part-solved, with dashed cages, pencil marks and a digit pad" width="330">
 
 ```
 ./bootstrap.sh          # dist/index.html
@@ -18,14 +22,24 @@ Every row, column and 3×2 box holds 1–6 once. The dashed cages add to the sma
 corner, and no digit repeats inside a cage.
 
 The app prefills a seed as an adjective–animal pair — `brisk-otter`, `tawny-heron` — hashed to a
-32-bit integer with FNV-1a. The same phrase always produces the same puzzle on any device, and the
-seed lives in the URL hash, so a puzzle is a link. Progress and the clock are kept per seed in
-`localStorage`.
+32-bit integer with FNV-1a. The same seed always produces the same puzzle on any device, and it
+lives in the URL hash, so a puzzle is a link.
 
-Tap a cell, tap a digit. Notes mode writes pencil marks, which clear themselves from a cell's
-row, column, box and cage peers when you commit a digit; undo covers those cascades too. The pad
-counts how many of each digit are left to place. Keyboard works as well: `1`–`6`, arrows,
-backspace, `N` for notes, `U` for undo.
+A seed is a name and a two-digit number: `brisk-otter-07`. Type one without a number and it *is*
+that name at `-00`, so **Next** and **Prev** always have somewhere to go. They walk the number and
+wrap, which is why Prev from `-00` lands on `-99` rather than refusing — a hundred puzzles per
+name, in a ring.
+
+**Ten puzzles are kept, not just the one on screen**, because Next and Prev make leaving a puzzle
+mid-thought the normal way to use this: step forward, get stuck, step back, and your grid is where
+you left it. The eleventh evicts the least recently opened.
+
+Tap a cell, tap a digit. Notes mode writes pencil marks, which clear themselves from a cell's row,
+column, box and cage peers when you commit a digit. One action is one undo however many cells it
+moved, so undoing that placement puts the digit *and* every note it rubbed out back. **Clear**
+starts the puzzle over, clock included, and is itself one undo away — which is why it does not
+stop to ask. The pad counts how many of each digit are left to place. Keyboard works too: `1`–`6`,
+arrows, backspace, `N` notes, `U` undo, `[` and `]` for Prev and Next.
 
 ### Not spoiling it
 
