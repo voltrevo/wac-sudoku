@@ -188,6 +188,10 @@ svg.cages text{fill:var(--cage);font:600 23px ui-sans-serif,-apple-system,"Segoe
   display:flex;flex-direction:column;gap:10px}
 .hintbar[hidden]{display:none}
 .hintbar p{margin:0;font-size:14px;line-height:1.55;color:var(--hintink)}
+.hintbar p[hidden]{display:none}
+#hintwhere{font-weight:650}
+#hintsays{font-weight:650;padding-top:2px;border-top:1px solid var(--hint2)}
+.hintbar.teaching{border-style:dashed}
 .hintrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .hintrow button{padding:10px;border-radius:10px;border:1px solid var(--hint2);background:var(--panel);
   color:var(--ink);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
@@ -272,7 +276,9 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
   </div>
 
   <div class="hintbar" id="hintbar" hidden>
+    <p id="hintwhere"></p>
     <p id="hinttext"></p>
+    <p id="hintsays"></p>
     <div class="hintrow">
       <button id="hintmore" type="button"></button>
       <button id="hintdone" type="button">Dismiss</button>
@@ -423,7 +429,7 @@ let cageMembers = null;
  * function of your own entries, so it is re-derived on load and vanishing is what turning the
  * setting off should do. */
 let auto = null;
-const settings = { assist: false };
+const settings = { assist: false, teach: false };
 const shown = i => val[i] || auto[i];
 let val = null, notes = null, undoStack = [], batch = null, sel = -1,
     noteMode = false, revealed = false;
@@ -523,17 +529,48 @@ const oneBit = m => { let d = 0, n = 0;
   for (let x = 1; x <= N; x++) if (m & BIT(x)){ d = x; if (++n > 1) return 0; }
   return n === 1 ? d : 0; };
 const cellName = i => `r${(i / N | 0) + 1}c${i % N + 1}`;
+/** Two cells that cannot both hold the same digit, by the grid rules alone. */
+const sees = (x, y) => x !== y &&
+  ((x / N | 0) === (y / N | 0) || x % N === y % N || boxOf(x) === boxOf(y));
 
 const ROWS = Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, c) => r * N + c));
 const COLS = Array.from({ length: N }, (_, c) => Array.from({ length: N }, (_, r) => r * N + c));
 const BOXES = Array.from({ length: N }, (_, g) => Array.from({ length: N }, (_, k) =>
   (((g / (N / BW)) | 0) * BH + ((k / BW) | 0)) * N + (g % (N / BW)) * BW + (k % BW)));
+const BOX_NAMES = ["top-left","top-right","middle-left","middle-right","bottom-left","bottom-right"]
+  .map(n => `the ${n} box`);
 const REGIONS = [
   ...ROWS.map((cells, i) => ({ cells, name: `row ${i + 1}` })),
   ...COLS.map((cells, i) => ({ cells, name: `column ${i + 1}` })),
-  ...BOXES.map((cells, i) => ({ cells, name: `the ${["top-left","top-right","middle-left","middle-right","bottom-left","bottom-right"][i]} box` })),
+  ...BOXES.map((cells, i) => ({ cells, name: BOX_NAMES[i] })),
 ];
 const REGION_TOTAL = (N * (N + 1)) / 2;      // 21: every row, column and box holds 1..6 once
+const listNames = xs => xs.length < 2 ? xs[0] : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+
+/**
+ * Every set of cells whose total is known from the 21 rule alone: one, two or three whole rows,
+ * columns or boxes.
+ *
+ * Static, so it is built once. Three is enough — four rows are the complement of two, and say the
+ * same thing about the same cages.
+ */
+const UNIONS = (() => {
+  const out = [];
+  for (const [label, band, names] of [["row", ROWS, null], ["column", COLS, null], ["box", BOXES, BOX_NAMES]]){
+    const rec = (start, pick) => {
+      if (pick.length) out.push({
+        cells: pick.flatMap(i => band[i]), total: REGION_TOTAL * pick.length, k: pick.length,
+        name: pick.length === 1 ? (names ? names[pick[0]] : `${label} ${pick[0] + 1}`)
+            : names ? `the ${pick.length} highlighted boxes`
+            : `${label}s ${listNames(pick.map(x => x + 1))}`,
+      });
+      if (pick.length === 3) return;
+      for (let i = start; i < N; i++){ pick.push(i); rec(i + 1, pick); pick.pop(); }
+    };
+    rec(0, []);
+  }
+  return out.sort((a, b) => a.k - b.k);
+})();
 
 /** Digits still allowed in each empty cell by row, column, box and cage occupancy alone. */
 function candidates(){
@@ -751,62 +788,84 @@ function hunt(cand, pool, noted){
     }
   }
 
-  // 8. Locked into a line. If a cage can only put `d` on one row or column, nothing else on that
-  //    line can be `d` — which rubs out a mark somewhere the cage does not even reach.
+  /* 8. A digit the cage must hold, and one cell that can see everywhere it could go.
+   *
+   *    Wherever the digit lands inside the cage, that cell is looking straight at it — so it
+   *    cannot be that digit itself. Requiring all the homes to line up on one row or column, as
+   *    this used to, is a special case: then every other cell on the line sees them. Dropping that
+   *    requirement is what catches the rest.
+   */
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
     for (let d = 1; d <= N; d++){
-      // **`must`, not merely possible.** "Wherever it goes in this cage it lands on this line" is
-      // only an argument if the digit goes in the cage at all. Requiring it to be *placeable*
-      // there rules it out of the line even when the cage may not contain it — the same mistake as
-      // hunting hidden singles in a cage, and it silently finished five grids wrong.
       if (!(c.must & BIT(d))) continue;
-      const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
-      if (!spots.length) continue;
-      for (const [pick, band, label] of [[i => i / N | 0, ROWS, "row"], [i => i % N, COLS, "column"]]){
-        const line = pick(spots[0]);
-        if (!spots.every(i => pick(i) === line)) continue;
-        const victim = band[line].find(i => !shown(i) && cage[i] !== k && (noted[i] & BIT(d)) && (pool[i] & BIT(d)));
-        if (victim === undefined) continue;
-        return unnote(victim, d, [...cageMembers[k], ...band[line]],
-          `Look at the cage totalling ${sums[k]}, and at ${label} ${line + 1}.`,
-          `Wherever that digit goes in this cage, it lands on this ${label} — so the ${label} has` +
-          ` its copy of it already spoken for, and no cell outside the cage can be it.`);
+      const homes = c.cells.filter((i, t) => c.per[t] & BIT(d));
+      if (!homes.length) continue;
+      const line = homes.every(i => (i / N | 0) === (homes[0] / N | 0)) ? `row ${(homes[0] / N | 0) + 1}`
+                 : homes.every(i => i % N === homes[0] % N) ? `column ${homes[0] % N + 1}` : null;
+      for (let x = 0; x < CELLS; x++){
+        if (shown(x) || cage[x] === k || !(noted[x] & BIT(d))) continue;
+        if (!homes.every(h => sees(x, h))) continue;
+        return { kind: "unnote", cell: x, digit: d, cells: [...cageMembers[k], x],
+          where: `Look at the cage totalling ${sums[k]} — and at where its ${d} can go.`,
+          why: line
+            ? `It cannot do without a ${d}, and wherever that ${d} lands in the cage it lands on` +
+              ` ${line}. So the ${line} copy is already spoken for, and no cell outside the cage on` +
+              ` it can be ${d}.`
+            : `It cannot do without a ${d}, and the only cells that could take it are` +
+              ` ${listNames(homes.map(cellName))}. ${cellName(x)} shares a row, a column or a box` +
+              ` with every one of them, so wherever that ${d} goes, ${cellName(x)} is looking at it.` };
       }
     }
   }
 
-  // 9. Region arithmetic. Every row, column and box adds to 21, so a cage lying wholly inside one,
-  //    or poking a single cell out of one, gives that odd cell away.
-  for (const reg of REGIONS){
-    const inReg = new Set(reg.cells);
-    const touching = [...new Set(reg.cells.map(i => cage[i]))];
+  /* 9. Region arithmetic, over any one, two or three whole rows, columns or boxes.
+   *
+   *    A union of `k` of them holds 21k. Subtract the cages lying wholly inside and what is left
+   *    over is a set of cells whose total is known; add up every cage that touches it instead and
+   *    the overflow outside is known the same way. One cell left over names a digit outright,
+   *    which needs nothing pencilled — so those come first, simplest union first.
+   */
+  const facts = [];
+  for (const u of UNIONS){
+    const inReg = new Set(u.cells);
+    const touching = [...new Set(u.cells.map(i => cage[i]))];
+    const many = u.k > 1;
 
     const inside = touching.filter(k => cageMembers[k].every(i => inReg.has(i)));
-    const covered = new Set(inside.flatMap(k => cageMembers[k]));
-    const left = reg.cells.filter(i => !covered.has(i));
-    if (inside.length && left.length === 1 && !shown(left[0])){
-      const d = REGION_TOTAL - inside.reduce((t, k) => t + sums[k], 0);
-      if (d >= 1 && d <= N && !oneBit(pool[left[0]]))
-        return place(left[0], d, [...covered, left[0]],
-          `Look at ${reg.name}, and at which cages sit entirely inside it.`,
-          `Every row, column and box holds 1 to 6, so it adds to ${REGION_TOTAL}. The cages wholly` +
-          ` inside this one cover all of it but a single cell — so that cell is ${REGION_TOTAL}` +
-          ` minus their totals.`);
+    if (inside.length){
+      const covered = new Set(inside.flatMap(k => cageMembers[k]));
+      const innies = u.cells.filter(i => !covered.has(i));
+      if (innies.length && innies.length <= 4) facts.push({
+        cells: innies, sum: u.total - inside.reduce((t, k) => t + sums[k], 0), k: u.k,
+        span: [...covered, ...innies],
+        where: `Look at ${u.name}, and at which cages sit entirely inside.`,
+        lead: `Every row, column and box holds 1 to 6, so ${many ? `together they hold ${u.total}`
+               : `it holds ${u.total}`}. The cages wholly inside account for all of it bar` });
     }
 
     const union = new Set(touching.flatMap(k => cageMembers[k]));
-    const out = [...union].filter(i => !inReg.has(i));
-    if (out.length === 1 && !shown(out[0])){
-      const d = touching.reduce((t, k) => t + sums[k], 0) - REGION_TOTAL;
-      if (d >= 1 && d <= N && !oneBit(pool[out[0]]))
-        return place(out[0], d, [...union],
-          `Look at ${reg.name} — and at the one cell its cages reach outside it.`,
-          `Every row, column and box adds to ${REGION_TOTAL}. Add up every cage that touches this` +
-          ` one: together they cover it exactly, plus that single cell outside. So the cell outside` +
-          ` is their totals minus ${REGION_TOTAL}.`);
-    }
+    const outies = [...union].filter(i => !inReg.has(i));
+    if (outies.length && outies.length <= 4) facts.push({
+      cells: outies, sum: touching.reduce((t, k) => t + sums[k], 0) - u.total, k: u.k,
+      span: [...union],
+      where: `Look at ${u.name} — and at what its cages reach outside.`,
+      lead: `Every row, column and box holds 1 to 6, so ${many ? `together they hold ${u.total}`
+             : `it holds ${u.total}`}. Every cage touching them covers that exactly, plus` });
+  }
+  facts.sort((a, b) => (a.k - b.k) || (a.cells.length - b.cells.length));
+
+  const factOpen = f => f.cells.filter(i => !shown(i));
+  const factNeed = f => f.sum - f.cells.filter(i => shown(i)).reduce((t, i) => t + shown(i), 0);
+
+  for (const f of facts){
+    const open = factOpen(f);
+    if (open.length !== 1) continue;
+    const d = factNeed(f);
+    if (d < 1 || d > N || oneBit(pool[open[0]])) continue;
+    return place(open[0], d, f.span, f.where,
+      `${f.lead} a single cell — so ${cellName(open[0])} is what the arithmetic leaves over.`);
   }
 
   const tight = pool.slice();
@@ -907,63 +966,37 @@ function hunt(cand, pool, noted){
     }
   }
 
-  // 13. Region arithmetic again, where two cells poke out rather than one. That does not name a
-  //     digit, but knowing what a pair adds to still rules plenty out.
-  for (const reg of REGIONS){
-    const inReg = new Set(reg.cells);
-    const touching = [...new Set(reg.cells.map(i => cage[i]))];
-    const inside = touching.filter(k => cageMembers[k].every(i => inReg.has(i)));
-    const covered = new Set(inside.flatMap(k => cageMembers[k]));
-    const union = new Set(touching.flatMap(k => cageMembers[k]));
-
-    const cases = [];
-    const innies = reg.cells.filter(i => !covered.has(i));
-    if (inside.length && innies.length === 2)
-      cases.push([innies, REGION_TOTAL - inside.reduce((t, k) => t + sums[k], 0),
-        `${reg.name}, and the two of its cells no cage sits wholly inside`,
-        `the cages wholly inside it cover all but those two`]);
-    const outies = [...union].filter(i => !inReg.has(i));
-    if (outies.length === 2)
-      cases.push([outies, touching.reduce((t, k) => t + sums[k], 0) - REGION_TOTAL,
-        `${reg.name} and the two cells its cages reach outside it`,
-        `every cage touching it covers it exactly, plus those two`]);
-
-    for (const [pair, total, whereBit, whyBit] of cases){
-      if (total < 2 || total > 2 * N - 1) continue;
-      // One of the two already filled makes the other a placement rather than an elimination.
-      const openOnes = pair.filter(i => !shown(i));
-      if (openOnes.length === 1){
-        const known = pair.find(i => shown(i));
-        const d = total - shown(known);
-        if (d >= 1 && d <= N && !oneBit(pool[openOnes[0]]))
-          return place(openOnes[0], d, pair, `Look at ${whereBit}.`,
-            `Every row, column and box adds to ${REGION_TOTAL}, and ${whyBit} — so those two cells` +
-            ` add to ${total}. One of them you already have.`);
-        continue;
+  /* 13. The same arithmetic where more than one cell is left over. That does not name a digit,
+   *     but knowing what a handful of cells add to still rules plenty out — and since it reads
+   *     their options, every one of them has to be pencilled.
+   */
+  for (const f of facts){
+    const open = factOpen(f);
+    if (open.length < 2 || open.length > 4) continue;
+    if (open.some(i => !noted[i])) continue;
+    const need = factNeed(f);
+    if (need < 1 || need > open.length * N) continue;
+    const per = new Array(open.length).fill(0);
+    const walk = (t, sum, used) => {
+      if (t === open.length){ if (sum !== need) return; used.forEach((d, z) => { per[z] |= BIT(d); }); return; }
+      for (let d = 1; d <= N; d++){
+        if (!(tight[open[t]] & BIT(d)) || sum + d > need) continue;
+        used.push(d); walk(t + 1, sum + d, used); used.pop();
       }
-      if (openOnes.length !== 2) continue;
-      // Ruling a digit out because its partner has nothing to pair with reads the partner's
-      // options; those have to be marks on the board rather than our own working.
-      if (openOnes.some(i => !noted[i])) continue;
-      for (const [x, y] of [[pair[0], pair[1]], [pair[1], pair[0]]]){
-        for (let d = 1; d <= N; d++){
-          if (!(tight[x] & BIT(d))) continue;
-          let ok = false;
-          for (let e = 1; e <= N; e++) if ((tight[y] & BIT(e)) && d + e === total) ok = true;
-          if (ok) continue;
-          const hit = strike(x, d, pair,
-            `Look at ${whereBit}.`,
-            `Every row, column and box adds to ${REGION_TOTAL}, and ${whyBit} — so those two cells` +
-            ` add to ${total}. One of the digits still going in ${cellName(x)} has nothing left in` +
-            ` ${cellName(y)} to pair with.`);
-          if (hit) return hit;
-        }
-      }
+    };
+    walk(0, 0, []);
+    for (let t = 0; t < open.length; t++){
+      const gone = tight[open[t]] & ~per[t];
+      if (!gone) continue;
+      const d = [1,2,3,4,5,6].find(x => gone & BIT(x));
+      const hit = strike(open[t], d, f.span, f.where,
+        `${f.lead} ${open.length === f.cells.length ? "" : "some cells you already have, and "}` +
+        `${listNames(open.map(cellName))} — so those add to ${need}. No way of making ${need}` +
+        ` out of what you have pencilled in them puts ${d} in ${cellName(open[t])}.`);
+      if (hit) return hit;
     }
   }
 
-  // 14. Nothing places or rubs out. Narrowing a bare cell to a short list is still a step, and it
-  //     is the one that turns a blank grid into something to reason about.
   /* Shortest list first, but any list will do. Ruling out even one digit is worth having when the
    * alternative is nothing, and everything above this point needs marks on the board to work on —
    * so this is the way in as much as it is a hint. Unlike the arguments above, the options *are*
@@ -1076,39 +1109,46 @@ function conflicts(){
  * action with an explainer beside it rather than something always on. It judges only the digits the
  * player entered — not pencil marks, and not cells the assist worked out, which are consequences of
  * entries rather than decisions. It says *that* a digit is wrong, never what belongs there. */
-function clearHint(){ hint = null; hintStage = 0; $("hintbar").hidden = true; }
+function clearHint(){ hint = null; hintStage = 0; }
+function dismissHint(){ clearHint(); draw(); }
 
-function paintHint(){
-  const bar = $("hintbar"), more = $("hintmore");
-  if (!hint){ bar.hidden = true; draw(); return; }
+const TEACHING = 9;
+
+const conclusionOf = h =>
+    h.kind === "unnote" ? `${cellName(h.cell)} cannot be ${h.digit}.`
+  : h.kind === "note"   ? (countOf(h.digits) === 2
+        ? `${cellName(h.cell)} is either ${listOf(h.digits).replace(" and ", " or ")}.`
+        : `${cellName(h.cell)} is one of ${listOf(h.digits)}.`)
+  :                       `${cellName(h.cell)} is ${h.digit}.`;
+
+/* Rendered from state and nothing else — `draw` calls it, so it must not call `draw` back. */
+function renderHintBar(){
+  const bar = $("hintbar"), more = $("hintmore"), done = $("hintdone");
+  if (!hint){ bar.hidden = true; return; }
   bar.hidden = false;
-  if (hint.blocked){
-    $("hinttext").textContent = hintStage >= 2 ? hint.why : hint.where;
-    more.hidden = hintStage >= 2;
-    more.textContent = "Go on";
-  } else if (hintStage === 1){
-    $("hinttext").textContent = hint.where;
-    more.hidden = false; more.textContent = "Why?";
-  } else if (hintStage === 2){
-    $("hinttext").textContent = hint.why;
-    more.hidden = false; more.textContent = "Just tell me";
-  } else {
-    $("hinttext").textContent =
-        hint.kind === "unnote" ? `${cellName(hint.cell)} cannot be ${hint.digit}.`
-      : hint.kind === "note"   ? (countOf(hint.digits) === 2
-            ? `${cellName(hint.cell)} is either ${listOf(hint.digits).replace(" and ", " or ")}.`
-            : `${cellName(hint.cell)} is one of ${listOf(hint.digits)}.`)
-      :                          `${cellName(hint.cell)} is ${hint.digit}.`;
-    more.hidden = false; more.textContent = "Another hint";
-  }
-  $("hintdone").textContent = hintStage >= 3 ? "Done" : "Dismiss";
-  draw();
+  bar.classList.toggle("teaching", hintStage === TEACHING);
+
+  const showWhy = hintStage === TEACHING || hintStage >= 2;
+  const showSays = !hint.blocked && (hintStage === TEACHING || hintStage >= 3);
+  $("hintwhere").textContent = hint.where;
+  $("hinttext").textContent = hint.why;
+  $("hinttext").hidden = !showWhy;
+  $("hintsays").textContent = showSays ? conclusionOf(hint) : "";
+  $("hintsays").hidden = !showSays;
+
+  // Teaching mode has no ladder to climb and nothing to accept: it is simply what follows next.
+  if (hintStage === TEACHING){ more.hidden = true; done.hidden = true; return; }
+  done.hidden = false;
+  done.textContent = hintStage >= 3 ? "Done" : "Dismiss";
+  more.hidden = hint.blocked && hintStage >= 2;
+  more.textContent = hint.blocked ? "Go on"
+    : hintStage === 1 ? "Why?" : hintStage === 2 ? "Just tell me" : "Another hint";
 }
 
 function askHint(){
   hint = findHint();
   hintStage = 1;
-  paintHint();
+  draw();
 }
 
 function escalate(){
@@ -1126,7 +1166,7 @@ function escalate(){
     commit();
     sel = hint.cell;
   }
-  paintHint();
+  draw();
 }
 
 function runCheck(){
@@ -1138,6 +1178,13 @@ function runCheck(){
 
 function draw(){
   deriveAuto();
+  /* **Teaching mode has no sequence to follow.** The hint is recomputed from the board every time
+   * it changes, so doing something else — something better, or something wrong — is answered by
+   * the next hint rather than by losing your place. There is nothing to accept. */
+  if (settings.teach && cage){
+    hint = (revealed || val.every((v, i) => shown(i) > 0)) ? null : findHint();
+    hintStage = hint ? TEACHING : 0;
+  }
   const bad = conflicts();
   const selV = sel >= 0 ? shown(sel) : 0;
   const selR = sel >= 0 ? sel / N | 0 : -1, selC = sel >= 0 ? sel % N : -1;
@@ -1172,6 +1219,7 @@ function draw(){
   }
   $("undo").disabled = undoStack.length === 0;
   $("reveal").disabled = revealed;
+  renderHintBar();
   const full = val.every((v, i) => shown(i) > 0);
   const won = full && bad.size === 0;
   $("board").classList.toggle("done", won);
@@ -1557,7 +1605,7 @@ function build(text){
   notes = Array.from({ length: CELLS }, () => new Set());
   undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
   solvedAt = 0; solvedIn = 0; dirty = false; check = null;
-  hint = null; hintStage = 0; $("hintbar").hidden = true;
+  clearHint();
   load();
   remember(seedText);
   $("cages").innerHTML = cageSvg(cage, sums);
@@ -1650,6 +1698,21 @@ function historyHTML(){
 
 function settingsHTML(){
   return `<label class="opt">
+    <input type="checkbox" id="optteach"${settings.teach ? " checked" : ""}>
+    <span class="otxt">
+      <span class="oname">Teaching mode</span>
+      <span class="owhy">
+        <p>Keeps a hint on screen the whole time, in full — where to look, why, and what it comes
+           to — and works it out again every time the board changes.</p>
+        <p>There is nothing to accept and no sequence to follow. Do what it says or do something
+           else entirely; the next hint answers whatever you actually did. Make a mistake and it
+           will start telling you about the mistake.</p>
+        <p>It reads your pencil marks like any hint does, so the more you write down the sharper it
+           gets. Turn it off and hints go back to being something you ask for, one step at a time.</p>
+      </span>
+    </span>
+  </label>
+  <label class="opt">
     <input type="checkbox" id="optassist"${settings.assist ? " checked" : ""}>
     <span class="otxt">
       <span class="oname">Fill in the forced cells</span>
@@ -1694,7 +1757,8 @@ function howtoHTML(){
       <li><b>Settings</b> has an opt-in that fills in cells whose digit is forced by what you have
           already entered. Off by default, and it cascades — read the note beside it first.</li>
       <li><b>Hint</b> in the menu points at the next step, then explains it, then does it — three
-          taps, stop wherever you like. It reasons rather than reading the answer.</li>
+          taps, stop wherever you like. It reasons rather than reading the answer. <b>Settings</b>
+          has a teaching mode that keeps one on screen the whole time instead.</li>
       <li><b>Check progress</b> in the menu marks your entered digits right or wrong. It is the only
           thing besides Reveal that looks at the answer; the <b>?</b> beside it says what that
           costs.</li>
@@ -1729,6 +1793,9 @@ function hintHelpHTML(){
           pencils the shortlist. One Undo takes it back out.</li>
     </ul>
     <p>Stop at any point. Dismissing costs nothing and nothing is counted.</p>
+    <p><b>Teaching mode</b>, under Settings, skips the three taps and keeps a full hint on screen
+       the whole time, worked out again on every change. Nothing to accept, no sequence to follow —
+       do something else and the next hint answers what you actually did.</p>
     <h4>It reads your pencil marks</h4>
     <p><b>A mark is an assertion.</b> Writing 2 4 5 in a cell says it is one of those, and hints
        take you at your word — everything below reasons from your marks as well as from the digits.
@@ -1834,6 +1901,12 @@ function openSettings(){
       saveSettings();
       draw();                 // `deriveAuto` runs from `draw`, so this both fills and unfills
     });
+    $("optteach").addEventListener("change", e => {
+      settings.teach = e.target.checked;
+      if (!settings.teach) clearHint();
+      saveSettings();
+      draw();
+    });
   });
 }
 
@@ -1866,7 +1939,7 @@ $("mhinthelp").addEventListener("click", e => {
   showSheet("Hints", hintHelpHTML());
 });
 $("hintmore").addEventListener("click", escalate);
-$("hintdone").addEventListener("click", clearHint);
+$("hintdone").addEventListener("click", dismissHint);
 $("mcheck").addEventListener("click", () => { openMenu(false); runCheck(); });
 $("mcheckhelp").addEventListener("click", e => {
   e.stopPropagation();                       // the label runs the check; the mark explains it

@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 106 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 116 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -108,10 +108,15 @@ Not every hint is a digit:
 It tries the easy things first, so you get the simplest step available rather than the cleverest: a
 cage down to its last cell, a cell only one digit fits, a mark the grid has already ruled out, a
 digit with one home left in a row, column or box, a mark the cage's total rules out, a cell that
-total pins down, a digit the cage cannot do without, a digit its cage locks onto one line, then
-**region arithmetic** — every row, column and box adds to 21, so a cage lying wholly inside one or
-poking a single cell out of one gives that cell away — then the same hunts again over what the cages
-have narrowed things to.
+total pins down, a digit the cage cannot do without, then **a digit the cage must hold whose every
+possible home one outside cell can see** — locked candidates, without the usual requirement that
+the homes line up on a row.
+
+Then **region arithmetic**. Any one, two or three whole rows, columns or boxes hold 21 each.
+Subtract the cages lying wholly inside and what remains is a set of cells whose total is known; add
+up every cage that touches it instead and the overflow outside is known the same way. One cell left
+over names a digit outright and needs nothing pencilled. After that, the same hunts again over what
+the cages have narrowed things to.
 
 **A hint will never use options you have not written down.** Telling you two blank cells "are 1 and
 4 in some order" hands over a real deduction for free and then reasons on top of it — the giveaway
@@ -140,15 +145,32 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-Over **300 blank grids**, hints only: **208 finish (69%)**, 92 give up, **0 finish on a wrong
-grid**, and all 92 stuck boards still have exactly one solution — so nothing a hint placed was ever
-wrong. From four correct digits in it is 30 of 30. A hint costs a few milliseconds.
+Over **300 blank grids**, hints only: **263 finish (88%)**, 37 give up, **0 finish on a wrong
+grid**, and all 37 stuck boards still have exactly one solution — so nothing a hint placed was ever
+wrong. From four correct digits in it is 30 of 30. A hint costs a fraction of a millisecond.
+
+The 37 stall at the opening — 32.5 of 36 cells still empty, 72% of those already pencilled. A quad
+would help exactly one of them. All 37 have a one-cell contradiction available; whether some of
+those restate as direct arguments the way locked candidates did is untested, and assuming they do
+not has already been wrong twice.
 
 A blank grid is the worst case by design, since nothing is pencilled and the eliminations have
 nowhere to land. Letting them run on cells the player had *not* marked would reach 75%, but that
 25% is bought by giving deductions away, which is not what a hint is for. Letting the shortlist
 offer any length instead — where the options are the hint rather than its hidden premise — gets most
 of it back honestly.
+
+### Teaching mode
+
+Under **Settings**. Keeps a hint on screen the whole time, in full — where to look, why, and what it
+comes to — and works it out again every time the board changes.
+
+There is nothing to accept and no sequence to follow. Do what it says or do something else entirely;
+the next hint answers whatever you actually did. Make a mistake and it starts telling you about the
+mistake. It reads your pencil marks like any hint does, so the more you write down the sharper it
+gets.
+
+<img src="docs/teaching.png" alt="Teaching mode, with a hint shown in full below the grid" width="300">
 
 ### Checking your progress
 
