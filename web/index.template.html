@@ -12,6 +12,7 @@
   --thick:#1a1d21; --cage:#2f6fd0; --tint:#eceef1; --sel:#9cc4f5; --peer:#dfeafa;
   --same:#c3dbf8; --bad:#d92b2b; --good:#127a3d; --key:#fff; --keyb:#d3d9e0;
   --acc:#2f6fd0; --derived:#8a93a0; --hint:#fdf0d0; --hint2:#f8dd9a; --hintink:#8a5a06;
+  --purple:#e6dcfa; --teal:#d3edea; --purpleink:#5b3fa8; --tealink:#0f6f68;
 }
 @media (prefers-color-scheme:dark){
   :root{
@@ -20,6 +21,7 @@
     --peer:#233a56; --same:#2c4a70; --bad:#ff6b6b; --good:#4ade80; --key:#212832;
     --keyb:#333c46; --acc:#6ea8fe; --derived:#7c8794;
     --hint:#37301c; --hint2:#544722; --hintink:#e8c987;
+    --purple:#332a4d; --teal:#173b38; --purpleink:#b9a4ee; --tealink:#6fc6bd;
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -147,9 +149,16 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
 /* A check recolours the digit, and takes the colour channel over while it shows — see `draw`. */
 .cell.ok{color:var(--good)}
 .cell.nope{color:var(--bad)}
-/* A hint takes the background over while it shows; it is transient and it is what you asked for. */
-.cell.hintr{background:var(--hint)}
-.cell.hintc{background:var(--hint2)}
+/* A hint takes the background over while it shows; it is transient and it is what you asked for.
+ * Three tones so the text can name what it means — the purple cage, the teal row, the amber cell —
+ * instead of spelling out coordinates. Later classes win, so the target always reads through. */
+.cell.tone-t{background:var(--teal)}
+.cell.tone-p{background:var(--purple)}
+.cell.tone-a{background:var(--hint2)}
+.swatch{display:inline-block;padding:0 5px;border-radius:5px;font-weight:650;white-space:nowrap}
+.swatch.p{background:var(--purple);color:var(--purpleink)}
+.swatch.t{background:var(--teal);color:var(--tealink)}
+.swatch.a{background:var(--hint2);color:var(--hintink)}
 .cell .n{position:absolute;inset:31% 5% 5%;display:grid;
   grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
   font-size:clamp(7px,2.4vw,10px);font-weight:600;color:var(--dim);line-height:1;pointer-events:none}
@@ -540,9 +549,9 @@ const BOXES = Array.from({ length: N }, (_, g) => Array.from({ length: N }, (_, 
 const BOX_NAMES = ["top-left","top-right","middle-left","middle-right","bottom-left","bottom-right"]
   .map(n => `the ${n} box`);
 const REGIONS = [
-  ...ROWS.map((cells, i) => ({ cells, name: `row ${i + 1}` })),
-  ...COLS.map((cells, i) => ({ cells, name: `column ${i + 1}` })),
-  ...BOXES.map((cells, i) => ({ cells, name: BOX_NAMES[i] })),
+  ...ROWS.map((cells, i) => ({ cells, kind: "row", name: `row ${i + 1}` })),
+  ...COLS.map((cells, i) => ({ cells, kind: "column", name: `column ${i + 1}` })),
+  ...BOXES.map((cells, i) => ({ cells, kind: "box", name: BOX_NAMES[i] })),
 ];
 const REGION_TOTAL = (N * (N + 1)) / 2;      // 21: every row, column and box holds 1..6 once
 const listNames = xs => xs.length < 2 ? xs[0] : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
@@ -561,9 +570,9 @@ const listNames = xs => xs.length < 2 ? xs[0] : `${xs.slice(0, -1).join(", ")} a
  */
 const UNIONS = (() => {
   const named = [
-    ...ROWS.map((cells, i) => ({ cells, name: `row ${i + 1}` })),
-    ...COLS.map((cells, i) => ({ cells, name: `column ${i + 1}` })),
-    ...BOXES.map((cells, i) => ({ cells, name: BOX_NAMES[i] })),
+    ...ROWS.map((cells, i) => ({ cells, kind: "row", name: `row ${i + 1}` })),
+    ...COLS.map((cells, i) => ({ cells, kind: "column", name: `column ${i + 1}` })),
+    ...BOXES.map((cells, i) => ({ cells, kind: "box", name: BOX_NAMES[i] })),
   ].map(r => ({ ...r, set: new Set(r.cells) }));
 
   const out = [], seen = new Set();
@@ -573,7 +582,8 @@ const UNIONS = (() => {
     if (seen.has(key)) return;
     seen.add(key);
     out.push({ cells, total: REGION_TOTAL * pick.length, k: pick.length,
-               name: listNames(pick.map(t => named[t].name)) });
+               name: listNames(pick.map(t => named[t].name)),
+               kindWord: pick.length === 1 ? named[pick[0]].kind : "cells" });
   };
   const free = (pick, t) => pick.every(u => !named[u].cells.some(i => named[t].set.has(i)));
   for (let a = 0; a < named.length; a++){
@@ -679,11 +689,11 @@ function cagePlacements(k, pool){
 
 /** Which house already holds `d`, for saying *why* a pencil mark cannot stand. */
 function blamedBy(i, d){
-  const r = i / N | 0, c = i % N;
-  if (ROWS[r].some(j => shown(j) === d)) return `there is already a ${d} in row ${r + 1}`;
-  if (COLS[c].some(j => shown(j) === d)) return `there is already a ${d} in column ${c + 1}`;
-  if (BOXES[boxOf(i)].some(j => shown(j) === d)) return `there is already a ${d} in its box`;
-  if (cageMembers[cage[i]].some(j => shown(j) === d)) return `its cage already has a ${d}`;
+  for (const [cells, what] of [[ROWS[i / N | 0], "row"], [COLS[i % N], "column"],
+                               [BOXES[boxOf(i)], "box"], [cageMembers[cage[i]], "cage"]]){
+    const at = cells.find(j => shown(j) === d);
+    if (at !== undefined) return { at, what };
+  }
   return null;
 }
 
@@ -739,8 +749,25 @@ function hunt(cand, pool, noted){
     offers.push({ ...h, cost: (cost + h.cells.length / 8) / Math.max(1, worth) });
   };
   const cages = sums.map((_, k) => cagePlacements(k, pool));
-  const place = (cell, digit, cells, where, why) => ({ kind: "place", cell, digit, cells, where, why });
-  const unnote = (cell, digit, cells, where, why) => ({ kind: "unnote", cell, digit, cells, where, why });
+  /* A hint names what it is talking about by colour rather than by coordinates: the purple cage,
+   * the teal row, the amber cell. Groups are painted in order and the target last, so it always
+   * reads through whatever it sits inside. The colour is never the only channel — the text always
+   * says what kind of thing it is too, which is what carries the meaning if the tones are hard to
+   * tell apart. */
+  const tonesOf = (groups, target) => {
+    const t = new Array(CELLS).fill(null);
+    for (const [tone, cells] of groups) for (const i of cells) t[i] = tone;
+    if (target !== undefined && target !== null) t[target] = "a";
+    return t;
+  };
+  const spanOf = (groups, target) =>
+    [...new Set([...groups.flatMap(([, cells]) => cells), ...(target === undefined ? [] : [target])])];
+  const shaped = (h, groups) =>
+    ({ ...h, groups, tones: tonesOf(groups, h.cell), cells: spanOf(groups, h.cell) });
+  const place = (cell, digit, groups, where, why) =>
+    shaped({ kind: "place", cell, digit, where, why }, groups);
+  const unnote = (cell, digit, groups, where, why) =>
+    shaped({ kind: "unnote", cell, digit, where, why }, groups);
 
   // 1. A cage down to its last cell: the total names it. Said even when the digit collides with
   //    something — the collision is the news.
@@ -749,14 +776,14 @@ function hunt(cand, pool, noted){
     if (!c || c.m !== 1) continue;
     const d = sums[k] - c.acc;
     if (d < 1 || d > N)
-      return { blocked: true, cells: cageMembers[k],
-        where: `The cage totalling ${sums[k]} cannot be finished.`,
-        why: `It has one cell left and needs ${d} in it, which is not a digit. Something already` +
-             ` in this cage is wrong.` };
-    offer(COST.cageLast, place(c.cells[0], d, cageMembers[k],
-      `The cage totalling ${sums[k]} has one cell left.`,
-      `You know what it adds to and you know every other digit in it, so the last one is whatever` +
-      ` is missing.`));
+      return shaped({ blocked: true, cell: c.cells[0],
+        where: `The [[p|cage]] cannot be finished.`,
+        why: `It adds to ${sums[k]}, has one cell left, and needs ${d} in it — which is not a digit.` +
+             ` Something already in the cage is wrong.` }, [["p", cageMembers[k]]]);
+    offer(COST.cageLast, place(c.cells[0], d, [["p", cageMembers[k]]],
+      `The [[p|cage]] has one cell left.`,
+      `It adds to ${sums[k]} and you have every other digit in it, so the last one is whatever is` +
+      ` missing.`));
     break;
   }
 
@@ -765,7 +792,7 @@ function hunt(cand, pool, noted){
     if (shown(i)) continue;
     const d = oneBit(pool[i]);
     if (!d) continue;
-    offer(COST.nakedSingle, place(i, d, [i], `Look at ${cellName(i)}.`,
+    offer(COST.nakedSingle, place(i, d, [], `Look at the [[a|cell]].`,
       noted[i] && countOf(cand[i]) > 1
         ? `You have pencilled it down to a short list, and everything on that list except one digit`
           + ` is now taken by its row, column, box or cage.`
@@ -782,8 +809,10 @@ function hunt(cand, pool, noted){
       if (!(noted[i] & BIT(d)) || (cand[i] & BIT(d))) continue;
       const blame = blamedBy(i, d);
       if (!blame) continue;
-      offer(COST.markVsGrid, unnote(i, d, [i], `Look at your pencil marks in ${cellName(i)}.`,
-        `One of them cannot be right any more — ${blame}.`));
+      offer(COST.markVsGrid, unnote(i, d, [["t", [blame.at]]],
+        `Look at the pencil marks in the [[a|cell]].`,
+        `One of them cannot be right any more: the [[t|cell]] is already a ${d}, and the two share` +
+        ` a ${blame.what}.`));
       break;
     }
   }
@@ -797,7 +826,7 @@ function hunt(cand, pool, noted){
         if (h.cells.some(i => shown(i) === d)) continue;
         const spots = h.cells.filter(i => !shown(i) && (from[i] & BIT(d)));
         if (spots.length !== 1 || oneBit(from[spots[0]])) continue;
-        return place(spots[0], d, h.cells, `Look at ${h.name}.`, why);
+        return place(spots[0], d, [["t", h.cells]], `Look at the [[t|${h.kind}]].`, why);
       }
     }
     return null;
@@ -816,11 +845,11 @@ function hunt(cand, pool, noted){
       if (!noted[i]) continue;
       for (let d = 1; d <= N; d++){
         if (!(pool[i] & BIT(d)) || (c.per[t] & BIT(d))) continue;
-        offer(COST.markVsCage, unnote(i, d, cageMembers[k],
-          `Look at ${cellName(i)} against the cage totalling ${sums[k]}.`,
-          `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out the ways` +
-          ` that can happen and throw away any needing a digit a cell cannot take — one of your` +
-          ` marks here appears in none of what is left.`));
+        offer(COST.markVsCage, unnote(i, d, [["p", cageMembers[k]]],
+          `Look at the [[a|cell]] against the [[p|cage]] it is in.`,
+          `The cage's ${c.m} empty cells must be different digits adding to ${c.need}. Write out the` +
+          ` ways that can happen and throw away any needing a digit a cell cannot take — one of the` +
+          ` marks in the amber cell appears in none of what is left.`));
         break;
       }
     }
@@ -833,10 +862,10 @@ function hunt(cand, pool, noted){
     for (let t = 0; t < c.m; t++){
       const i = c.cells[t], d = oneBit(c.per[t]);
       if (!d || oneBit(pool[i])) continue;
-      offer(COST.cagePins, place(i, d, cageMembers[k], `Look at the cage totalling ${sums[k]}.`,
+      offer(COST.cagePins, place(i, d, [["p", cageMembers[k]]], `Look at the [[p|cage]].`,
         `Its ${c.m} empty cells must be ${c.m} different digits adding to ${c.need}. Write out the` +
         ` ways that can happen, and throw away any that need a digit a cell cannot take. Every one` +
-        ` that is left puts the same digit in ${cellName(i)}.`));
+        ` that is left puts the same digit in the [[a|cell]].`));
       break;
     }
   }
@@ -850,11 +879,11 @@ function hunt(cand, pool, noted){
       if (!(c.must & BIT(d))) continue;
       const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
       if (spots.length !== 1 || oneBit(pool[spots[0]])) continue;
-      offer(COST.cageMust, place(spots[0], d, cageMembers[k],
-        `Look at the cage totalling ${sums[k]} — and at what it cannot do without.`,
+      offer(COST.cageMust, place(spots[0], d, [["p", cageMembers[k]]],
+        `Look at the [[p|cage]] — and at what it cannot do without.`,
         `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out every way` +
         ` that can happen: one digit turns up in all of them, so the cage must hold it — and only` +
-        ` one of its cells can.`));
+        ` the [[a|cell]] can take it.`));
       break;
     }
   }
@@ -870,20 +899,20 @@ function hunt(cand, pool, noted){
   /* Several digits at once where an argument rules out several: knocking them out one at a time
    * hides the moment they leave a single digit standing, which is a placement rather than a
    * fourth elimination. */
-  const strikeSet = (victim, mask, cells, where, why) => {
+  const strikeSet = (victim, mask, groups, where, why) => {
     const before = noted[victim] ? noted[victim] : (pool[victim] === ALL ? ALL : 0);
     if (!before) return null;
     const left = before & ~mask;
     if (!left || left === before) return null;
     const one = oneBit(left);
-    if (one) return place(victim, one, cells, where, why);
+    if (one) return place(victim, one, groups, where, why);
     if (noted[victim] && countOf(before & mask) === 1)
-      return { kind: "unnote", cell: victim, digit: oneBit(before & mask), cells, where, why };
-    return { kind: "note", cell: victim, digits: left, cells, where, why };
+      return unnote(victim, oneBit(before & mask), groups, where, why);
+    return shaped({ kind: "note", cell: victim, digits: left, where, why }, groups);
   };
-  const strike = (victim, d, cells, where, why) => strikeSet(victim, BIT(d), cells, where, why);
-  const strikeAny = (victims, d, cells, where, why) => {
-    for (const v of victims){ const h = strike(v, d, cells, where, why); if (h) return h; }
+  const strike = (victim, d, groups, where, why) => strikeSet(victim, BIT(d), groups, where, why);
+  const strikeAny = (victims, d, groups, where, why) => {
+    for (const v of victims){ const h = strike(v, d, groups, where, why); if (h) return h; }
     return null;
   };
 
@@ -917,20 +946,28 @@ function hunt(cand, pool, noted){
       const homes = one ? c.cells.filter((i, t) => c.per[t] & BIT(one)) : [];
       const line = one && homes.every(i => (i / N | 0) === (homes[0] / N | 0)) ? `row ${(homes[0] / N | 0) + 1}`
                  : one && homes.every(i => i % N === homes[0] % N) ? `column ${homes[0] % N + 1}` : null;
-      const hit = strikeSet(x, mask, [...cageMembers[k], x],
-        `Look at the cage totalling ${sums[k]} — and at where its digits can go.`,
+      const spots = [...new Set([1,2,3,4,5,6].filter(z => mask & BIT(z))
+        .flatMap(z => c.cells.filter((i, t) => c.per[t] & BIT(z))))];
+      /* Only worth a second colour when it picks out part of the cage. Where every empty cell is a
+       * home — which is what happens once the cage cannot do without most of its digits — teal
+       * would paint over the purple entirely and the text would name a colour that is not there. */
+      const some = spots.length < c.m;
+      const hit = strikeSet(x, mask, some ? [["p", cageMembers[k]], ["t", spots]]
+                                          : [["p", cageMembers[k]]],
+        some ? `Look at the [[p|cage]] — and at the [[t|cells]] its digits can go in.`
+             : `Look at the [[p|cage]] — and at where its digits can go.`,
         many
-          ? `Its ${c.m} empty cells add to ${c.need}, so it cannot do without ${listOf(mask)}. Every` +
-            ` cell any of those could go in is one ${cellName(x)} shares a row, a column or a box` +
-            ` with — so wherever each of them lands, ${cellName(x)} is looking at it, and it can be` +
-            ` none of them.`
+          ? `Its ${c.m} empty cells add to ${c.need}, so it cannot do without ${listOf(mask)}. The` +
+            ` [[a|cell]] shares a row, a column or a box with every ${some ? "teal" : "purple"} cell` +
+            ` — so wherever each of those digits lands, it is looking at it, and can be none of` +
+            ` them.`
           : line
             ? `It cannot do without a ${one}, and wherever that ${one} lands in the cage it lands on` +
-              ` ${line}. So the ${line} copy is already spoken for, and no cell outside the cage on` +
-              ` it can be ${one}.`
-            : `It cannot do without a ${one}, and the only cells that could take it are` +
-              ` ${listNames(homes.map(cellName))}. ${cellName(x)} shares a row, a column or a box` +
-              ` with every one of them, so wherever that ${one} goes it is looking at it.`);
+              ` the same ${line}. That ${line}'s ${one} is spoken for, so no cell on it outside the` +
+              ` cage can be ${one}.`
+            : `It cannot do without a ${one}, and the only cells that could take it are the` +
+              ` ${some ? "[[t|ones]]" : "purple ones"}. The [[a|cell]] shares a row, a column or a` +
+              ` box with every one of them, so wherever that ${one} goes it is looking at it.`);
       if (hit){ offer(COST.seesAllHomes, hit); break; }
     }
   }
@@ -946,41 +983,60 @@ function hunt(cand, pool, noted){
   for (const u of UNIONS){
     const inReg = new Set(u.cells);
     const touching = [...new Set(u.cells.map(i => cage[i]))];
-    const many = u.k > 1;
 
     const inside = touching.filter(k => cageMembers[k].every(i => inReg.has(i)));
     if (inside.length){
-      const covered = new Set(inside.flatMap(k => cageMembers[k]));
-      const innies = u.cells.filter(i => !covered.has(i));
+      const covered = inside.flatMap(k => cageMembers[k]);
+      const innies = u.cells.filter(i => !covered.includes(i));
       if (innies.length && innies.length <= 4) facts.push({
-        cells: innies, sum: u.total - inside.reduce((t, k) => t + sums[k], 0), k: u.k,
-        span: [...covered, ...innies],
-        where: `Look at ${u.name}, and at which cages sit entirely inside.`,
-        lead: `Every row, column and box holds 1 to 6, so ${many ? `together they hold ${u.total}`
-               : `it holds ${u.total}`}. The cages wholly inside account for all of it bar` });
+        side: "in", cells: innies, region: u.cells, other: covered, u,
+        sum: u.total - inside.reduce((t, k) => t + sums[k], 0), k: u.k });
     }
 
-    const union = new Set(touching.flatMap(k => cageMembers[k]));
-    const outies = [...union].filter(i => !inReg.has(i));
+    const union = [...new Set(touching.flatMap(k => cageMembers[k]))];
+    const outies = union.filter(i => !inReg.has(i));
     if (outies.length && outies.length <= 4) facts.push({
-      cells: outies, sum: touching.reduce((t, k) => t + sums[k], 0) - u.total, k: u.k,
-      span: [...union],
-      where: `Look at ${u.name} — and at what its cages reach outside.`,
-      lead: `Every row, column and box holds 1 to 6, so ${many ? `together they hold ${u.total}`
-             : `it holds ${u.total}`}. Every cage touching them covers that exactly, plus` });
+      side: "out", cells: outies, region: u.cells, other: u.cells, u,
+      sum: touching.reduce((t, k) => t + sums[k], 0) - u.total, k: u.k });
   }
   facts.sort((a, b) => (a.k - b.k) || (a.cells.length - b.cells.length));
 
   const factOpen = f => f.cells.filter(i => !shown(i));
   const factNeed = f => f.sum - f.cells.filter(i => shown(i)).reduce((t, i) => t + shown(i), 0);
 
+  /* Groups are built here rather than with the fact, because the target is only known now — and a
+   * colour the words name has to be a colour on the grid. Painting the region teal and the cages
+   * inside it purple looks fine until the cages cover everything but the target, at which point
+   * the teal is gone and the sentence is talking about something invisible. So the two sets are
+   * kept disjoint and an empty one is dropped, with the wording following. */
+  const factGroups = (f, target) => {
+    const rest = f.side === "in"
+      ? [f.other.filter(i => i !== target), f.region.filter(i => !f.other.includes(i) && i !== target)]
+      : [f.cells.filter(i => i !== target), f.region.filter(i => i !== target)];
+    return { groups: [["t", rest[1]], ["p", rest[0]]].filter(([, cs]) => cs.length),
+             purple: rest[0].length > 0, teal: rest[1].length > 0 };
+  };
+  const factWhere = (f, g) => f.side === "in"
+    ? (g.purple ? `Look at the [[p|cages]] — every one sits inside a single ${f.u.kindWord}.`
+                : `Look at the ${f.u.kindWord} the [[a|cell]] is in.`)
+    : (g.teal ? `Look at the [[t|${f.u.kindWord}]] — and at what its cages reach outside.`
+              : `Look at what the cages of one ${f.u.kindWord} reach outside it.`);
+  const factLead = (f, g) => f.side === "in"
+    ? `Every row, column and box holds 1 to 6, so that ${f.u.kindWord} holds ${f.u.total}.`
+      + ` ${g.purple ? "The purple cages" : "The cages wholly inside it"} account for all of it bar`
+    : `Every row, column and box holds 1 to 6, so ${g.teal ? "the teal cells hold" : "it holds"}`
+      + ` ${f.u.total}. Every cage touching them covers that exactly, plus`;
+
   for (const f of facts){
     const open = factOpen(f);
     if (open.length !== 1) continue;
     const d = factNeed(f);
     if (d < 1 || d > N || oneBit(pool[open[0]])) continue;
-    offer(COST.regionOne + 8 * (f.k - 1), place(open[0], d, f.span, f.where,
-      `${f.lead} a single cell — so ${cellName(open[0])} is what the arithmetic leaves over.`));
+    const g = factGroups(f, open[0]);
+    offer(COST.regionOne + 8 * (f.k - 1), place(open[0], d, g.groups, factWhere(f, g),
+      `${factLead(f, g)} ${f.cells.length === 1 ? "a single cell"
+        : `${f.cells.length} cells, and you already have all but one of them`} — so the [[a|cell]]` +
+      ` is what the arithmetic leaves over.`));
     break;
   }
 
@@ -1003,7 +1059,8 @@ function hunt(cand, pool, noted){
     if (shown(i) || oneBit(pool[i])) continue;
     const d = oneBit(tight[i]);
     if (!d) continue;
-    offer(COST.deepNaked, place(i, d, [i], `Look at ${cellName(i)} — and at the cage it is in.`,
+    offer(COST.deepNaked, place(i, d, [["p", cageMembers[cage[i]]]],
+      `Look at the [[a|cell]] — and at the [[p|cage]] it is in.`,
       `Take the digits its row, column and box still allow, then keep only those its cage can` +
       ` afford alongside its other cells. One survives.`));
     break;
@@ -1021,10 +1078,11 @@ function hunt(cand, pool, noted){
         if (countOf(pairU) === 2){
           const others = h.cells.filter(i => !shown(i) && !group2.includes(i) && (tight[i] & pairU));
           for (const d of [1,2,3,4,5,6]) if (pairU & BIT(d)){
-            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d, [...group2, ...others],
-              `Look at ${h.name} — two of its cells have the same two options.`,
-              `${cellName(group2[0])} and ${cellName(group2[1])} are ${listOf(pairU)} in one order or` +
-              ` the other. Between them they use up both, so nothing else in ${h.name} can be either.`);
+            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d,
+              [["t", h.cells], ["p", group2]],
+              `Look at the [[t|${h.kind}]] — two of its cells have the same two options.`,
+              `The two [[p|cells]] are ${listOf(pairU)} in one order or the other. Between them they` +
+              ` use up both, so nothing else in the ${h.kind} can be either.`);
             if (hit){ offer(COST.nakedPair, hit); break nakedSubsets; }
           }
         }
@@ -1034,10 +1092,11 @@ function hunt(cand, pool, noted){
           const group = [open[a], open[b], open[z]];
           const others = h.cells.filter(i => !shown(i) && !group.includes(i) && (tight[i] & u));
           for (const d of [1,2,3,4,5,6]) if (u & BIT(d)){
-            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d, [...group, ...others],
-              `Look at ${h.name} — three of its cells share three options.`,
-              `${group.map(cellName).join(", ")} hold ${listOf(u)} between them in some order. All` +
-              ` three digits are spoken for, so nothing else in ${h.name} can be any of them.`);
+            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d,
+              [["t", h.cells], ["p", group]],
+              `Look at the [[t|${h.kind}]] — three of its cells share three options.`,
+              `The three [[p|cells]] hold ${listOf(u)} between them in some order. All three digits` +
+              ` are spoken for, so nothing else in the ${h.kind} can be any of them.`);
             if (hit){ offer(COST.nakedTriple, hit); break nakedSubsets; }
           }
         }
@@ -1065,10 +1124,10 @@ function hunt(cand, pool, noted){
           const extra = tight[v] & ~both;
           if (!extra) continue;
           const spare = [1,2,3,4,5,6].find(x => extra & BIT(x));
-          const hit = strike(v, spare, sd,
-            `Look at ${h.name} — two digits with only the same two homes.`,
-            `${d} and ${e} can each only go in ${cellName(sd[0])} or ${cellName(sd[1])}. Two digits` +
-            ` and two cells, so between them those cells are ${d} and ${e} — and nothing else.`);
+          const hit = strike(v, spare, [["t", h.cells], ["p", sd]],
+            `Look at the [[t|${h.kind}]] — two digits with only the same two homes.`,
+            `${d} and ${e} can each only go in the two [[p|cells]]. Two digits and two cells, so` +
+            ` between them those cells are ${d} and ${e} — and nothing else.`);
           if (hit){ offer(COST.hiddenPair, hit); break hiddenPairs; }
         }
       }
@@ -1098,11 +1157,11 @@ function hunt(cand, pool, noted){
           const l = pick(sp[0]);
           if (!sp.every(i => pick(i) === l)) continue;
           const hit = strikeAny(band[l].filter(i => !shown(i) && boxOf(i) !== g && (tight[i] & BIT(d))),
-            d, [...BOXES[g], ...band[l]],
-            `Look at ${BOX_NAMES[g]}, and at ${label} ${l + 1}.`,
-            `Every cell in that box that can still take a ${d} sits on ${label} ${l + 1}. So the` +
-            ` box's ${d} is somewhere along it — which uses up that ${label}'s ${d}, and leaves` +
-            ` none for its cells outside the box.`);
+            d, [["t", band[l]], ["p", BOXES[g]]],
+            `Look at the [[p|box]], and at the [[t|${label}]] crossing it.`,
+            `Every cell in the box that can still take a ${d} sits on that ${label}. So the box's` +
+            ` ${d} is somewhere along it — which uses up the ${label}'s ${d}, and leaves none for` +
+            ` its cells outside the box.`);
           if (hit){ offer(COST.pointing, hit); break cornered; }
         }
       }
@@ -1117,9 +1176,9 @@ function hunt(cand, pool, noted){
           const g = boxOf(sp[0]);
           if (!sp.every(i => boxOf(i) === g)) continue;
           const hit = strikeAny(BOXES[g].filter(i => !shown(i) && !band[l].includes(i) && (tight[i] & BIT(d))),
-            d, [...band[l], ...BOXES[g]],
-            `Look at ${label} ${l + 1}, and at ${BOX_NAMES[g]}.`,
-            `Every cell on that ${label} that can still take a ${d} is inside the box. So the` +
+            d, [["p", BOXES[g]], ["t", band[l]]],
+            `Look at the [[t|${label}]], and at the [[p|box]] it runs through.`,
+            `Every cell on the ${label} that can still take a ${d} is inside the box. So the` +
             ` ${label}'s ${d} is one of them — which is the box's ${d} too, and the rest of the box` +
             ` cannot have one.`);
           if (hit){ offer(COST.claiming, hit); break cornered; }
@@ -1135,11 +1194,11 @@ function hunt(cand, pool, noted){
         const k = cage[sp[0]];
         if (!sp.every(i => cage[i] === k)) continue;
         const hit = strikeAny(cageMembers[k].filter(i => !shown(i) && !h.cells.includes(i) && (tight[i] & BIT(d))),
-          d, [...h.cells, ...cageMembers[k]],
-          `Look at ${h.name}, and at the cage totalling ${sums[k]}.`,
-          `Every cell in ${h.name} that can still take a ${d} belongs to that cage. So the cage is` +
-          ` where ${h.name}'s ${d} goes — and the cage cannot hold a second one, so its cells` +
-          ` outside ${h.name} are not ${d}.`);
+          d, [["t", h.cells], ["p", cageMembers[k]]],
+          `Look at the [[t|${h.kind}]], and at the [[p|cage]] overlapping it.`,
+          `Every cell in the ${h.kind} that can still take a ${d} belongs to that cage. So the cage` +
+          ` is where the ${h.kind}'s ${d} goes — and it cannot hold a second one, so the cage's` +
+          ` cells outside the ${h.kind} are not ${d}.`);
         if (hit){ offer(COST.houseToCage, hit); break cornered; }
       }
     }
@@ -1170,10 +1229,12 @@ function hunt(cand, pool, noted){
       const gone = tight[open[t]] & ~per[t];
       if (!gone) continue;
       const d = [1,2,3,4,5,6].find(x => gone & BIT(x));
-      const hit = strike(open[t], d, f.span, f.where,
-        `${f.lead} ${open.length === f.cells.length ? "" : "some cells you already have, and "}` +
-        `${listNames(open.map(cellName))} — so those add to ${need}. No way of making ${need}` +
-        ` out of what you have pencilled in them puts ${d} in ${cellName(open[t])}.`);
+      const g = factGroups(f, open[t]);
+      const hit = strike(open[t], d, g.groups, factWhere(f, g),
+        `${factLead(f, g)} ${open.length === f.cells.length ? "" : "some cells you already have, and "}` +
+        `the [[a|cell]] with ${open.length - 1} other${open.length > 2 ? "s" : ""} — so those add to` +
+        ` ${need}. No way of making ${need} out of what you have pencilled in them puts ${d} in the` +
+        ` amber cell.`);
       if (hit){ offer(COST.regionCut + 8 * (f.k - 1) + 4 * (open.length - 2), hit); break regionCuts; }
     }
   }
@@ -1194,11 +1255,11 @@ function hunt(cand, pool, noted){
       if (shown(i) || noted[i]) continue;
       const n = countOf(c.per[t]);
       if (n < 2 || n > 3 || n >= countOf(cand[i])) continue;
-      offer(COST.cageShortlist + n, { kind: "note", cell: i, digits: c.per[t], cells: cageMembers[k],
-        where: `Look at the cage totalling ${sums[k]}.`,
+      offer(COST.cageShortlist + n, shaped({ kind: "note", cell: i, digits: c.per[t],
+        where: `Look at the [[p|cage]].`,
         why: `Its ${c.m} cells must be ${c.m} different digits adding to ${sums[k]}. There are not` +
-             ` many ways to do that, and every one of them leaves ${cellName(i)} with the same` +
-             ` ${n} options.` });
+             ` many ways to do that, and every one of them leaves the [[a|cell]] with the same` +
+             ` ${n} options.` }, [["p", cageMembers[k]]]));
       break;
     }
   }
@@ -1208,13 +1269,13 @@ function hunt(cand, pool, noted){
       if (shown(i) || noted[i]) continue;
       const n = countOf(tight[i]);
       if (n !== limit) continue;
-      offer(COST.shortlist + n, { kind: "note", cell: i, digits: tight[i], cells: [i],
-        where: n <= 3 ? `Look at ${cellName(i)} — it has fewer options than it looks.`
-                      : `Look at ${cellName(i)} — not everything can go there.`,
+      offer(COST.shortlist + n, shaped({ kind: "note", cell: i, digits: tight[i],
+        where: n <= 3 ? `Look at the [[a|cell]] — it has fewer options than it looks.`
+                      : `Look at the [[a|cell]] — not everything can go there.`,
         why: `Take out everything its row, column and box already hold, then everything its cage` +
              ` cannot afford alongside its other cells. ${n === N - 1 ? "One digit falls away" :
              `Only ${n} digits survive`}, and pencilling what is left is what lets the sharper` +
-             ` arguments get a grip.` });
+             ` arguments get a grip.` }, []));
       break;
     }
     if (offers.length) break;
@@ -1350,12 +1411,21 @@ function tryOne(pool, noted){
  */
 /** As `strike` inside the cascade, but usable from the fallback, which has no `tight` to hand. */
 function strikeOut(victim, d, pool, noted, where, why){
-  const cells = [victim];
-  if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
+  const tones = new Array(CELLS).fill(null); tones[victim] = "a";
+  const base = { cell: victim, cells: [victim], tones, where, why };
+  if (noted[victim] & BIT(d)) return { ...base, kind: "unnote", digit: d };
   const ALL = (1 << (N + 1)) - 2;
   if (!noted[victim] && pool[victim] === ALL)
-    return { kind: "note", cell: victim, digits: ALL & ~BIT(d), cells, where, why };
+    return { ...base, kind: "note", digits: ALL & ~BIT(d) };
   return null;
+}
+
+/** Tones for the reports that are not offers and so never went through `shaped`. */
+function litUp(target, others = []){
+  const t = new Array(CELLS).fill(null);
+  for (const i of others) t[i] = "p";
+  if (target !== undefined) t[target] = "a";
+  return t;
 }
 
 function findHint(){
@@ -1367,8 +1437,8 @@ function findHint(){
   const cages = sums.map((_, k) => cagePlacements(k, pool));
   const noRoom = [...Array(CELLS).keys()].find(i => !shown(i) && !pool[i]);
   if (noRoom !== undefined)
-    return { blocked: true, cells: [noRoom],
-      where: `${cellName(noRoom)} has nothing left it can be.`,
+    return { blocked: true, cells: [noRoom], tones: litUp(noRoom),
+      where: `The [[a|cell]] has nothing left it can be.`,
       why: noted[noRoom]
         ? `Every digit you have pencilled there is now taken by its row, column, box or cage. Either` +
           ` a mark was wrong or a digit near it is.`
@@ -1376,22 +1446,22 @@ function findHint(){
           ` which — Check progress can.` };
   const deadCage = cages.findIndex(c => c && !c.any);
   if (deadCage >= 0)
-    return { blocked: true, cells: cageMembers[deadCage],
-      where: `The cage totalling ${sums[deadCage]} cannot be filled.`,
+    return { blocked: true, cells: cageMembers[deadCage], tones: litUp(undefined, cageMembers[deadCage]),
+      where: `The [[p|cage]] cannot be filled.`,
       why: `There is no way to make its total out of different digits that its cells can still` +
            ` take. Something in it, or pencilled in it, is wrong.` };
 
   const guess = tryOne(pool, noted);
   if (guess && guess.allDead !== undefined)
-    return { blocked: true, cells: [guess.allDead],
-      where: `Every option left for ${cellName(guess.allDead)} falls apart.`,
+    return { blocked: true, cells: [guess.allDead], tones: litUp(guess.allDead),
+      where: `Every option left for the [[a|cell]] falls apart.`,
       why: `Suppose each of them in turn and every one runs into a cell with nothing left or a cage` +
            ` that cannot reach its total. So something already on the board — a digit, or one of` +
            ` your pencil marks — is wrong. Check progress can tell you about the digits.` };
   if (guess){
     const g = guess;
     const hit = strikeOut(g.cell, g.digit, pool, noted,
-      `Think about what happens if ${cellName(g.cell)} were ${g.digit}.`,
+      `Think about what happens if the [[a|cell]] were ${g.digit}.`,
       g.rounds === 0
         ? `Nothing on this board follows on its own any more, so this is the point where you try one` +
           ` and watch it. Put the ${g.digit} in and it breaks straight away — a cell with nothing` +
@@ -1411,7 +1481,7 @@ function findHint(){
     // hints dead in 34 of 60 runs from a blank grid.
     const ignoring = hunt(cand, cand, new Array(CELLS).fill(0));
     if (ignoring && !ignoring.blocked && ignoring.kind !== "note")
-      return { blocked: true, cells: marked,
+      return { blocked: true, cells: marked, tones: litUp(undefined, marked),
         where: `Nothing follows while your pencil marks stand.`,
         why: `Taking them at their word, no step is available anywhere on the board. Ignore them` +
              ` and there is one — so one of them is almost certainly wrong. They are working, not` +
@@ -1468,12 +1538,17 @@ function dismissHint(){ clearHint(); draw(); }
 
 const TEACHING = 9;
 
+const TONE_NAME = { p: "purple", t: "teal", a: "amber" };
+/** `[[p|cage]]` becomes a purple chip reading "purple cage", matching the tint on the grid. */
+const paint = txt => txt.replace(/\[\[([pta])\|([^\]]*)\]\]/g,
+  (_, tone, word) => `<span class="swatch ${tone}">${TONE_NAME[tone]}${word ? " " + word : ""}</span>`);
+
 const conclusionOf = h =>
-    h.kind === "unnote" ? `${cellName(h.cell)} cannot be ${h.digit}.`
+    h.kind === "unnote" ? `The [[a|cell]] cannot be ${h.digit}.`
   : h.kind === "note"   ? (countOf(h.digits) === 2
-        ? `${cellName(h.cell)} is either ${listOf(h.digits).replace(" and ", " or ")}.`
-        : `${cellName(h.cell)} is one of ${listOf(h.digits)}.`)
-  :                       `${cellName(h.cell)} is ${h.digit}.`;
+        ? `The [[a|cell]] is either ${listOf(h.digits).replace(" and ", " or ")}.`
+        : `The [[a|cell]] is one of ${listOf(h.digits)}.`)
+  :                       `The [[a|cell]] is ${h.digit}.`;
 
 /* Rendered from state and nothing else — `draw` calls it, so it must not call `draw` back. */
 function renderHintBar(){
@@ -1484,10 +1559,10 @@ function renderHintBar(){
 
   const showWhy = hintStage === TEACHING || hintStage >= 2;
   const showSays = !hint.blocked && (hintStage === TEACHING || hintStage >= 3);
-  $("hintwhere").textContent = hint.where;
-  $("hinttext").textContent = hint.why;
+  $("hintwhere").innerHTML = paint(hint.where);
+  $("hinttext").innerHTML = paint(hint.why);
   $("hinttext").hidden = !showWhy;
-  $("hintsays").textContent = showSays ? conclusionOf(hint) : "";
+  $("hintsays").innerHTML = showSays ? paint(conclusionOf(hint)) : "";
   $("hintsays").hidden = !showSays;
 
   // Teaching mode has no ladder to climb and nothing to accept: it is simply what follows next.
@@ -1555,8 +1630,8 @@ function draw(){
      * marked. Checked over 12000 part-filled grids: no conflict was made only of correct digits. */
     el.classList.toggle("bad",  !check && bad.has(i));
     el.classList.toggle("derived", !val[i] && !!auto[i]);
-    el.classList.toggle("hintr", !!hint && !!hint.cells && hint.cells.includes(i));
-    el.classList.toggle("hintc", !!hint && hint.cell === i);
+    for (const t of ["t", "p", "a"])
+      el.classList.toggle(`tone-${t}`, !!hint && !!hint.tones && hint.tones[i] === t);
     el.classList.toggle("ok",   !!check && check[i] === 1);
     el.classList.toggle("nope", !!check && check[i] === -1);
     el.firstChild.textContent = v ? v : "";
@@ -2147,6 +2222,11 @@ function hintHelpHTML(){
           pencils the shortlist. One Undo takes it back out.</li>
     </ul>
     <p>Stop at any point. Dismissing costs nothing and nothing is counted.</p>
+    <h4>It points by colour</h4>
+    <p>A hint tints the things it is talking about and names them by colour — the
+       <b>purple cage</b>, the <b>teal row</b>, the <b>amber cell</b> it is about. The colour always
+       comes with what kind of thing it is, so the words still work if the tints are hard to tell
+       apart.</p>
     <p><b>Teaching mode</b>, under Settings, skips the three taps and keeps a full hint on screen
        the whole time, worked out again on every change. Nothing to accept, no sequence to follow —
        do something else and the next hint answers what you actually did.</p>

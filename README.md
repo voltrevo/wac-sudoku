@@ -86,7 +86,9 @@ with a knowingly wrong one.
 the way you would and stops at the first thing that follows, which is what lets it say *why*. Three
 taps, stop wherever you like:
 
-1. **Where** — highlights a cell, a cage or a region and says nothing else.
+1. **Where** — tints the things it is talking about and names them by colour: the purple cage, the
+   teal row, the amber cell it is about. No coordinates, and the colour always comes with what kind
+   of thing it is, so the words still work if the tints are hard to tell apart.
 2. **Why** — names the reasoning and leaves the arithmetic to you.
 3. **Just tell me** — writes the digit in. One Undo takes it back out.
 
