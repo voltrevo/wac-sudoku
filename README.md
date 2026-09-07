@@ -112,6 +112,13 @@ unit of progress, not simply cheapest.** A one-candidate elimination and a place
 same size of step, and ranking on effort alone let a cheap argument that rules out a single digit
 beat a dearer one that settles a cell outright. 
 
+**A hint is one step, not a shortcut past several.** It will not ask you to work out what every
+cage allows in every cell and then hand you a conclusion drawn from it: that work is progress, and
+discarding it to keep only the destination is a bad trade. Where an argument leans on the board
+being pencilled, the pencilling is offered first as a hint in its own right, and the argument waits
+until the marks are there. The two arguments that lean that way now fire twice in 3,847 hints, and
+never over a cell with no marks.
+
 **A hint also states everything it does.** An argument that rules out several digits from several
 cells offers all of them together — two cells that must add to 9 are each one of 3, 4, 5 and 6, so
 both shed both 1 and 2, and a hint naming one cell and one digit tells a quarter of the story.

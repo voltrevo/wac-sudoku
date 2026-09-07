@@ -857,8 +857,15 @@ function hunt(cand, pool, noted){
   // 4. A digit with only one home left in a row, column or box.
   //    Rows, columns and boxes only. A cage is **not** a house: it holds as many digits as it has
   //    cells, so a digit being absent from one says nothing about whether it belongs there.
-  const hiddenIn = (from, why) => {
+  /* `needMarks` is what keeps a hint to one step. Hunting over `tight` means leaning on what each
+   * cage's total allows in each of its cells — real work, and work that is itself progress. A hint
+   * that demands it and then throws it away is asking for the board to be pencilled without saying
+   * so, and taking the credit for the destination. So the deep hunt waits until the cells are
+   * marked; before that the shortlist offers the same narrowing as a step of its own, and the
+   * player keeps it. */
+  const hiddenIn = (from, why, needMarks) => {
     for (const h of REGIONS){
+      if (needMarks && h.cells.some(i => !shown(i) && !noted[i])) continue;
       for (let d = 1; d <= N; d++){
         if (h.cells.some(i => shown(i) === d)) continue;
         const spots = h.cells.filter(i => !shown(i) && (from[i] & BIT(d)));
@@ -1066,19 +1073,18 @@ function hunt(cand, pool, noted){
   // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
   //     merely absent. Two steps of reasoning, so it comes late.
   offer(COST.deepHidden, hiddenIn(tight,
-    `Work out first what each cage's total allows in each of its cells — that rules out more than` +
-    ` the grid alone does. Once it is ruled out, one of the digits this row, column or box is` +
-    ` missing has only a single cell left that can take it.`));
+    `Every empty cell here is pencilled, so the work is done: one of the digits this row, column or` +
+    ` box is still missing has a single cell whose marks include it, and nowhere else to go.`, true));
 
   // 10b. A cell the cage's allowance and the grid together pin down, though neither does alone.
   for (let i = 0; i < CELLS; i++){
-    if (shown(i) || oneBit(pool[i])) continue;
+    if (shown(i) || oneBit(pool[i]) || !noted[i]) continue;
     const d = oneBit(tight[i]);
     if (!d) continue;
     offer(COST.deepNaked, place(i, d, [["p", cageMembers[cage[i]]]],
       `Look at the [[a|cell]] — and at the [[p|cage]] it is in.`,
-      `Take the digits its row, column and box still allow, then keep only those its cage can` +
-      ` afford alongside its other cells. One survives.`));
+      `Of the digits you have pencilled there, only one is a digit the cage can actually afford` +
+      ` alongside its other cells.`));
     break;
   }
 
@@ -1578,9 +1584,19 @@ function dismissHint(){ clearHint(); draw(); }
 const TEACHING = 9;
 
 const TONE_NAME = { p: "purple", t: "teal", a: "amber" };
-/** `[[p|cage]]` becomes a purple chip reading "purple cage", matching the tint on the grid. */
-const paint = txt => txt.replace(/\[\[([pta])\|([^\]]*)\]\]/g,
-  (_, tone, word) => `<span class="swatch ${tone}">${TONE_NAME[tone]}${word ? " " + word : ""}</span>`);
+/**
+ * `[[p|cage]]` becomes a purple chip reading "purple cage", matching the tint on the grid.
+ *
+ * **Unless there is no purple on the grid**, in which case it renders as plain "cage". Groups
+ * overlap — a cage painted purple can be covered entirely by the cells its argument then paints
+ * teal or amber — and a sentence pointing at a colour that is not there is worse than one that
+ * simply names the thing. Guarding it here rather than at each technique makes the whole class of
+ * mistake impossible instead of fixed one site at a time.
+ */
+const paint = (txt, tones) => txt.replace(/\[\[([pta])\|([^\]]*)\]\]/g, (_, tone, word) =>
+  (tones && tones.includes(tone))
+    ? `<span class="swatch ${tone}">${TONE_NAME[tone]}${word ? " " + word : ""}</span>`
+    : (word || "cells"));
 
 const digitsOf = m => { const o = []; for (let d = 1; d <= N; d++) if (m & BIT(d)) o.push(d); return o; };
 
@@ -1618,10 +1634,10 @@ function renderHintBar(){
 
   const showWhy = hintStage === TEACHING || hintStage >= 2;
   const showSays = !hint.blocked && (hintStage === TEACHING || hintStage >= 3);
-  $("hintwhere").innerHTML = paint(hint.where);
-  $("hinttext").innerHTML = paint(hint.why);
+  $("hintwhere").innerHTML = paint(hint.where, hint.tones);
+  $("hinttext").innerHTML = paint(hint.why, hint.tones);
   $("hinttext").hidden = !showWhy;
-  $("hintsays").innerHTML = showSays ? paint(conclusionOf(hint)) : "";
+  $("hintsays").innerHTML = showSays ? paint(conclusionOf(hint), hint.tones) : "";
   $("hintsays").hidden = !showSays;
 
   // Teaching mode has no ladder to climb and nothing to accept: it is simply what follows next.
@@ -2292,6 +2308,11 @@ function hintHelpHTML(){
     </ul>
     <p>Stop at any point. Dismissing costs nothing and nothing is counted. A hint says everything it
        does, so one that rules a digit out of four cells says so and takes it out of all four.</p>
+    <p><b>And it is one step, not a shortcut past several.</b> A hint will not ask you to work out
+       what every cage allows in every cell and then hand you a conclusion drawn from it — that work
+       is progress, and throwing it away to keep only the destination is a bad trade. Where an
+       argument needs the board pencilled, the pencilling is offered first as a hint of its own, and
+       the argument waits until the marks are there.</p>
     <h4>It points by colour</h4>
     <p>A hint tints the things it is talking about and names them by colour — the
        <b>purple cage</b>, the <b>teal row</b>, the <b>amber cell</b> it is about. The colour always
