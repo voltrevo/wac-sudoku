@@ -167,6 +167,22 @@ under the old format.
 **Undo is not saved and is not meant to be.** It lives in memory for one puzzle: `build()` resets it
 on every switch, so it never outlives the grid it describes.
 
+### More than one tab
+
+**A tab only writes a puzzle it has itself changed.** `save()` runs from `draw()`, and `draw()` runs
+on things that are not edits — selecting a cell, stepping to the next puzzle, the tab being hidden.
+With the store mirrored from when the tab loaded, an old tab left open in the background would write
+its stale, empty grid over work done in another one, on nothing more than a tap.
+
+A tab that has been away catches up before it does anything: it re-reads on becoming visible, and on
+a `BroadcastChannel` message from whichever tab last wrote. It adopts what it finds unless it has
+edits of its own, which are the one thing it should not discard unasked. The recency list is merged
+rather than replaced, and eviction happens against the merged list, so one tab cannot delete a
+puzzle another one knows about.
+
+What is left: **two tabs actively editing the same puzzle still diverge, and the last write wins.**
+Neither view is wrong and nothing merges grids, so the honest thing is to say so rather than pick.
+
 ## How a puzzle is made unique
 
 Uniqueness is not tested after the fact and retried until it holds. It is preserved at every step,

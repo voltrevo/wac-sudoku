@@ -549,7 +549,7 @@ function select(i){ sel = i; start(); draw(); }
 function begin(){ batch = []; }
 function touch(i){ if (batch) batch.push({ i, v: val[i], n: new Set(notes[i]) }); }
 function commit(){
-  if (batch && batch.length) undoStack.push(batch);
+  if (batch && batch.length){ undoStack.push(batch); dirty = true; }
   batch = null;
 }
 
@@ -602,6 +602,7 @@ function clearAll(){
 
 function undo(){
   if (!undoStack.length) return;
+  dirty = true;
   const b = undoStack.pop();
   // Backwards, so a cell touched twice in one action comes back as it was before the action.
   for (let k = b.length - 1; k >= 0; k--){ val[b[k].i] = b[k].v; notes[b[k].i] = b[k].n; }
@@ -648,6 +649,19 @@ let order = [];                 // most recently opened first
 const pending = new Map();      // seed -> Uint8Array, or null to delete
 let flushTimer = 0;
 
+/* **A tab only writes a puzzle it has itself changed.**
+ *
+ * `save()` runs from `draw()`, and `draw()` runs on plenty of things that are not edits —
+ * selecting a cell, stepping to the next puzzle, the tab being hidden. `store` is a snapshot taken
+ * when the tab loaded. Together those meant an old tab left open in the background would write its
+ * stale, empty grid over work done in another one, on nothing more than a tap. */
+let dirty = false;
+
+/* And a tab that has been away catches up before it does anything: on becoming visible, and on
+ * hearing that another tab wrote. Without this, the stale snapshot merely waits for its first
+ * real edit to do the same damage more slowly. */
+const bus = typeof BroadcastChannel === "function" ? new BroadcastChannel("wac-sudoku") : null;
+
 const recent = () => order;
 const done = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
@@ -676,7 +690,9 @@ async function openStore(){
   keys.forEach((k, i) => store.set(k, vals[i]));
   // The stored order is advisory: anything it names that is gone is dropped, anything it misses is
   // appended, so a half-written flush costs recency rather than a puzzle.
-  const known = Array.isArray(saved) ? saved.filter(k => store.has(k)) : [];
+  // Not filtered by `store.has`: a puzzle opened and not yet touched has no record, and it is
+  // still the one you were last on.
+  const known = Array.isArray(saved) ? saved : [];
   order = [...known, ...keys.filter(k => !known.includes(k))];
 
   const kept = await done(db.transaction(META, "readonly").objectStore(META).get("settings"));
@@ -698,26 +714,67 @@ function writeSoon(){
 function flush(){
   flushTimer = 0;
   if (!db){ pending.clear(); return; }
+  const ops = [...pending];
+  pending.clear();
   try {
     const tx = db.transaction([PUZZLES, META], "readwrite");
-    const ps = tx.objectStore(PUZZLES);
-    for (const [k, v] of pending) v === null ? ps.delete(k) : ps.put(v, k);
-    tx.objectStore(META).put(order.slice(), "order");
-    pending.clear();
-  } catch (e) { pending.clear(); /* storage went away; the session still plays */ }
+    const ps = tx.objectStore(PUZZLES), ms = tx.objectStore(META);
+    for (const [k, v] of ops) v === null ? ps.delete(k) : ps.put(v, k);
+
+    // The order on disk may name puzzles this tab has never heard of. Ours goes first, since it
+    // holds the most recent thing, and theirs follows — replacing it wholesale would lose them.
+    const gone = new Set(ops.filter(([, v]) => v === null).map(([k]) => k));
+    const req = ms.get("order");
+    req.onerror = () => {};
+    // Its own guard: this runs as a request callback, outside the try around everything else.
+    req.onsuccess = () => {
+      try {
+        const theirs = Array.isArray(req.result) ? req.result : [];
+        const merged = [];
+        const seen = new Set();
+        for (const k of [...order, ...theirs]) if (!seen.has(k) && !gone.has(k)){ seen.add(k); merged.push(k); }
+        for (const old of merged.slice(KEEP)){ ps.delete(old); store.delete(old); }
+        order = merged.slice(0, KEEP);
+        ms.put(order.slice(), "order");
+      } catch (e) { /* the puzzles themselves are already written; only recency is at stake */ }
+    };
+    if (bus) tx.oncomplete = () => bus.postMessage(1);
+  } catch (e) { /* storage went away; the session still plays */ }
 }
 
 function remember(s){
+  // No eviction here: this list may be stale, and dropping a record on the strength of a stale
+  // list is how one tab deletes another's puzzle. `flush()` evicts, against the merged list.
   order = [s, ...order.filter(x => x !== s)];
-  for (const gone of order.slice(KEEP)){ store.delete(gone); pending.set(gone, null); }
-  order = order.slice(0, KEEP);
   writeSoon();
 }
+
+async function refresh(){
+  if (!db) return;
+  try {
+    const tx = db.transaction([PUZZLES, META], "readonly");
+    const [keys, vals, saved] = await Promise.all([
+      done(tx.objectStore(PUZZLES).getAllKeys()),
+      done(tx.objectStore(PUZZLES).getAll()),
+      done(tx.objectStore(META).get("order")),
+    ]);
+    store = new Map(keys.map((k, i) => [k, vals[i]]));
+    const known = Array.isArray(saved) ? saved : [];
+    order = [...known, ...keys.filter(k => !known.includes(k))];
+  } catch (e) { return; }
+
+  // Take the other tab's version of what is on screen — unless this tab has edits of its own,
+  // which are the one thing it would be wrong to throw away without being asked.
+  if (dirty || !cage) return;
+  if (load()) draw();
+}
+
+if (bus) bus.onmessage = () => refresh();
 
 const maskOf = set => { let m = 0; for (const d of set) m |= 1 << (d - 1); return m; };
 
 function save(){
-  if (!cage || !solution) return;
+  if (!cage || !solution || !dirty) return;
   const bytes = packState(solution, val, notes.map(maskOf),
                           elapsed + (ticking ? Date.now() - t0 : 0), revealed, solvedAt, solvedIn);
   store.set(seedText, bytes);
@@ -816,9 +873,9 @@ async function migrate(){
 
 /* ------------------------------------------------------------- new puzzle */
 function build(text){
-  // The puzzle being left keeps its clock. `save()` only runs from `draw()`, so without this the
-  // time between the last thing you did and stepping away is lost — and the clock counts thinking.
-  if (cage && solution){ stop(); save(); }
+  // The puzzle being left keeps its clock — if this tab actually played it. `save()` only runs
+  // from `draw()`, so without this the time between the last move and stepping away is lost.
+  if (cage && solution && dirty){ stop(); save(); flush(); }
 
   const typed = text.trim().toLowerCase().replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
   let { base, n } = splitSeed(typed);
@@ -840,7 +897,7 @@ function build(text){
   auto = new Array(CELLS).fill(0);
   notes = Array.from({ length: CELLS }, () => new Set());
   undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
-  solvedAt = 0; solvedIn = 0;
+  solvedAt = 0; solvedIn = 0; dirty = false;
   load();
   remember(seedText);
   $("cages").innerHTML = cageSvg(cage, sums);
@@ -1095,7 +1152,9 @@ addEventListener("hashchange", () => {
 });
 // Both also flush: a coalesced write must not be the one still waiting when the tab goes away.
 addEventListener("pagehide", () => { stop(); save(); flush(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); flush(); } });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden){ stop(); save(); flush(); } else refresh();
+});
 
 /* A link decides the puzzle; failing that, the one you were last on. `recent()` is ordered by
  * `remember()`, which `build()` calls — so its head is the last puzzle actually opened, and the
