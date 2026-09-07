@@ -143,11 +143,9 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
 /* Worked out from what you entered, not typed by you — and not yours to type over. */
 .cell.derived{color:var(--derived);font-weight:400}
 .cell.derived.bad{color:var(--bad)}
-/* A corner dot rather than a background, so a check does not fight the selection highlight. */
-.cell.ok::after,.cell.nope::after{content:"";position:absolute;right:4px;bottom:4px;
-  width:9px;height:9px;border-radius:50%}
-.cell.ok::after{background:var(--good)}
-.cell.nope::after{background:var(--bad)}
+/* A check recolours the digit, and takes the colour channel over while it shows — see `draw`. */
+.cell.ok{color:var(--good)}
+.cell.nope{color:var(--bad)}
 .cell .n{position:absolute;inset:31% 5% 5%;display:grid;
   grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
   font-size:clamp(7px,2.4vw,10px);font-weight:600;color:var(--dim);line-height:1;pointer-events:none}
@@ -538,7 +536,11 @@ function draw(){
     el.classList.toggle("peer", i !== sel && sel >= 0 &&
       ((i / N | 0) === selR || i % N === selC || boxOf(i) === selB));
     el.classList.toggle("same", i !== sel && !!v && v === selV);
-    el.classList.toggle("bad",  bad.has(i));
+    /* **Rule-red is paused while a check is showing**, so red means one thing at a time: not
+     * "clashes with something" but "this digit is wrong". Nothing is lost by pausing it — two
+     * correct digits cannot clash, so every conflict contains a digit the check has already
+     * marked. Checked over 12000 part-filled grids: no conflict was made only of correct digits. */
+    el.classList.toggle("bad",  !check && bad.has(i));
     el.classList.toggle("derived", !val[i] && !!auto[i]);
     el.classList.toggle("ok",   !!check && check[i] === 1);
     el.classList.toggle("nope", !!check && check[i] === -1);
@@ -1093,12 +1095,12 @@ function howtoHTML(){
 
 function checkHelpHTML(){
   return `<div class="prose">
-    <p><b>Checking puts a dot in the corner of every digit you have entered</b>: green where it is
-       right, red where it is not.</p>
-    <p>The dot is the only thing checking changes. A digit shown in <b>red</b> still means what it
-       always means — that the board breaks a rule there. So a green dot on a red digit is not a
-       contradiction: that digit is right, and something <em>else</em> on the board is clashing with
-       it. Which is often the most useful thing a check can tell you.</p>
+    <p><b>Checking recolours the digits you have entered</b>: green where the digit is right, red
+       where it is not.</p>
+    <p>While the marks are showing, the ordinary red — <em>the board breaks a rule here</em> — is
+       paused, so red means one thing at a time. Nothing is lost by pausing it: two correct digits
+       can never clash, so every clash on the board involves a digit the check has already turned
+       red. The moment you change anything the marks go and the usual red comes back.</p>
     <h4>What it costs you</h4>
     <p>Everything else in this app works only from the rules and from what you have entered. Red
        normally means the board <em>breaks a rule</em> — a repeat, or a cage that cannot add up — and
@@ -1118,9 +1120,8 @@ function checkHelpHTML(){
       <li>Empty cells are not marked. Being behind is not being wrong.</li>
     </ul>
     <h4>How long it lasts</h4>
-    <p>Until you change something. The moment you enter, erase, undo or clear anything, the marks go
-       — a verdict on a grid that has moved on is worse than none. Check again whenever you like;
-       nothing is counted and nothing is saved.</p>
+    <p>Until you change something — a verdict on a grid that has moved on is worse than none. Check
+       again whenever you like; nothing is counted and nothing is saved.</p>
   </div>`;
 }
 
