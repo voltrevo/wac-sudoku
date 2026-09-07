@@ -809,21 +809,153 @@ function hunt(cand, pool, noted){
     }
   }
 
-  // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
-  //     merely absent. Two steps of reasoning, so it comes late.
   const tight = pool.slice();
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
     c.cells.forEach((i, t) => { tight[i] = pool[i] & c.per[t]; });
   }
+
+  // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
+  //     merely absent. Two steps of reasoning, so it comes late.
   const deep = hiddenIn(tight,
     `Work out first what each cage's total allows in each of its cells — that rules out more than` +
     ` the grid alone does. Once it is ruled out, one of the digits this row, column or box is` +
     ` missing has only a single cell left that can take it.`);
   if (deep) return deep;
 
-  // 11. Nothing places or rubs out. Narrowing a bare cell to a short list is still a step, and it
+  /* An elimination has to land somewhere the player can see it. If the cell is already pencilled,
+   * rub the digit out; if it is bare, write what is left — that *is* the elimination, in their
+   * notation. Too long a list is no use to anybody, so a bare cell only takes one it can read. */
+  const strike = (victim, d, cells, where, why) => {
+    if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
+    const left = tight[victim] & ~BIT(d);
+    // Five is as long as a list can get after striking one, and a long list is still the
+    // elimination written down — capping at four silently threw away half the eliminations the
+    // techniques below had actually found.
+    const n = countOf(left);
+    if (n >= 2 && n <= N - 1) return { kind: "note", cell: victim, digits: left, cells, where, why };
+    return null;
+  };
+  const strikeAny = (victims, d, cells, where, why) => {
+    // Prefer a cell that is already pencilled: rubbing one digit out reads better than a rewrite.
+    for (const v of victims) if (noted[v] & BIT(d)){ const h = strike(v, d, cells, where, why); if (h) return h; }
+    for (const v of victims){ const h = strike(v, d, cells, where, why); if (h) return h; }
+    return null;
+  };
+
+  // 11. Two or three cells in a house sharing two or three options between them. Those digits are
+  //     spoken for, wherever they end up going, so nothing else in the house can have them.
+  for (const h of REGIONS){
+    const open = h.cells.filter(i => !shown(i) && countOf(tight[i]) >= 2);
+    for (let a = 0; a < open.length; a++){
+      for (let b = a + 1; b < open.length; b++){
+        const pairU = tight[open[a]] | tight[open[b]];
+        const group2 = [open[a], open[b]];
+        if (countOf(pairU) === 2){
+          const others = h.cells.filter(i => !shown(i) && !group2.includes(i) && (tight[i] & pairU));
+          for (const d of [1,2,3,4,5,6]) if (pairU & BIT(d)){
+            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d, [...group2, ...others],
+              `Look at ${h.name} — two of its cells have the same two options.`,
+              `${cellName(group2[0])} and ${cellName(group2[1])} are ${listOf(pairU)} in one order or` +
+              ` the other. Between them they use up both, so nothing else in ${h.name} can be either.`);
+            if (hit) return hit;
+          }
+        }
+        for (let z = b + 1; z < open.length; z++){
+          const u = pairU | tight[open[z]];
+          if (countOf(u) !== 3) continue;
+          const group = [open[a], open[b], open[z]];
+          const others = h.cells.filter(i => !shown(i) && !group.includes(i) && (tight[i] & u));
+          for (const d of [1,2,3,4,5,6]) if (u & BIT(d)){
+            const hit = strikeAny(others.filter(i => tight[i] & BIT(d)), d, [...group, ...others],
+              `Look at ${h.name} — three of its cells share three options.`,
+              `${group.map(cellName).join(", ")} hold ${listOf(u)} between them in some order. All` +
+              ` three digits are spoken for, so nothing else in ${h.name} can be any of them.`);
+            if (hit) return hit;
+          }
+        }
+      }
+    }
+  }
+
+  // 12. Two digits with the same two homes in a house. Those two cells are those two digits, so
+  //     everything else can come out of them.
+  for (const h of REGIONS){
+    for (let d = 1; d <= N; d++){
+      for (let e = d + 1; e <= N; e++){
+        if (h.cells.some(i => shown(i) === d || shown(i) === e)) continue;
+        const sd = h.cells.filter(i => !shown(i) && (tight[i] & BIT(d)));
+        const se = h.cells.filter(i => !shown(i) && (tight[i] & BIT(e)));
+        if (sd.length !== 2 || se.length !== 2 || sd[0] !== se[0] || sd[1] !== se[1]) continue;
+        const both = BIT(d) | BIT(e);
+        for (const v of sd){
+          const extra = tight[v] & ~both;
+          if (!extra) continue;
+          const spare = [1,2,3,4,5,6].find(x => extra & BIT(x));
+          const hit = strike(v, spare, sd,
+            `Look at ${h.name} — two digits with only the same two homes.`,
+            `${d} and ${e} can each only go in ${cellName(sd[0])} or ${cellName(sd[1])}. Two digits` +
+            ` and two cells, so between them those cells are ${d} and ${e} — and nothing else.`);
+          if (hit) return hit;
+        }
+      }
+    }
+  }
+
+  // 13. Region arithmetic again, where two cells poke out rather than one. That does not name a
+  //     digit, but knowing what a pair adds to still rules plenty out.
+  for (const reg of REGIONS){
+    const inReg = new Set(reg.cells);
+    const touching = [...new Set(reg.cells.map(i => cage[i]))];
+    const inside = touching.filter(k => cageMembers[k].every(i => inReg.has(i)));
+    const covered = new Set(inside.flatMap(k => cageMembers[k]));
+    const union = new Set(touching.flatMap(k => cageMembers[k]));
+
+    const cases = [];
+    const innies = reg.cells.filter(i => !covered.has(i));
+    if (inside.length && innies.length === 2)
+      cases.push([innies, REGION_TOTAL - inside.reduce((t, k) => t + sums[k], 0),
+        `${reg.name}, and the two of its cells no cage sits wholly inside`,
+        `the cages wholly inside it cover all but those two`]);
+    const outies = [...union].filter(i => !inReg.has(i));
+    if (outies.length === 2)
+      cases.push([outies, touching.reduce((t, k) => t + sums[k], 0) - REGION_TOTAL,
+        `${reg.name} and the two cells its cages reach outside it`,
+        `every cage touching it covers it exactly, plus those two`]);
+
+    for (const [pair, total, whereBit, whyBit] of cases){
+      if (total < 2 || total > 2 * N - 1) continue;
+      // One of the two already filled makes the other a placement rather than an elimination.
+      const openOnes = pair.filter(i => !shown(i));
+      if (openOnes.length === 1){
+        const known = pair.find(i => shown(i));
+        const d = total - shown(known);
+        if (d >= 1 && d <= N && !oneBit(pool[openOnes[0]]))
+          return place(openOnes[0], d, pair, `Look at ${whereBit}.`,
+            `Every row, column and box adds to ${REGION_TOTAL}, and ${whyBit} — so those two cells` +
+            ` add to ${total}. One of them you already have.`);
+        continue;
+      }
+      if (openOnes.length !== 2) continue;
+      for (const [x, y] of [[pair[0], pair[1]], [pair[1], pair[0]]]){
+        for (let d = 1; d <= N; d++){
+          if (!(tight[x] & BIT(d))) continue;
+          let ok = false;
+          for (let e = 1; e <= N; e++) if ((tight[y] & BIT(e)) && d + e === total) ok = true;
+          if (ok) continue;
+          const hit = strike(x, d, pair,
+            `Look at ${whereBit}.`,
+            `Every row, column and box adds to ${REGION_TOTAL}, and ${whyBit} — so those two cells` +
+            ` add to ${total}. One of the digits still going in ${cellName(x)} has nothing left in` +
+            ` ${cellName(y)} to pair with.`);
+          if (hit) return hit;
+        }
+      }
+    }
+  }
+
+  // 14. Nothing places or rubs out. Narrowing a bare cell to a short list is still a step, and it
   //     is the one that turns a blank grid into something to reason about.
   for (const limit of [2, 3]){
     for (let i = 0; i < CELLS; i++){
@@ -1605,8 +1737,16 @@ function hintHelpHTML(){
        the cleverest: a cage down to its last cell, a cell only one digit fits, a mark the grid has
        already ruled out, a digit with one home left in a row, column or box, a mark the cage's
        total rules out, what that total pins down, a digit the cage cannot do without, a digit
-       locked onto one line by its cage, the fact that <b>every row, column and box adds to 21</b>,
-       and last a shortlist for a cell that has none.</p>
+       locked onto one line by its cage, and the fact that <b>every row, column and box adds to
+       21</b> — which gives away any cell a cage pokes in or out of one.</p>
+    <p>Then the ones that need you to have candidates in mind: <b>two cells with the same two
+       options</b>, or three with the same three, which use those digits up for everything else in
+       the row; <b>two digits with only the same two homes</b>, which makes those cells exactly
+       those digits; and the 21 rule again where <b>two</b> cells poke out, which does not name a
+       digit but does fix what the pair adds to. Last of all, a shortlist for a cell that has
+       none.</p>
+    <p>Past that it stops. From a blank grid this ladder finishes about three puzzles in four; the
+       rest need assuming something and seeing it fail, which is the puzzle rather than a gap.</p>
     <h4>When it has nothing</h4>
     <p>It says so, and says which kind of nothing. Either something already entered is wrong — an
        empty cell nothing fits, or a cage that can no longer reach its total — in which case

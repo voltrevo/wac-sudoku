@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 99 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 106 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -111,7 +111,11 @@ digit with one home left in a row, column or box, a mark the cage's total rules 
 total pins down, a digit the cage cannot do without, a digit its cage locks onto one line, then
 **region arithmetic** — every row, column and box adds to 21, so a cage lying wholly inside one or
 poking a single cell out of one gives that cell away — then the same hunts again over what the cages
-have narrowed things to, and last a shortlist for a cell that has none.
+have narrowed things to.
+
+Then the ones that need candidates in mind: **naked pairs and triples**, **hidden pairs**, and the
+21 rule where **two** cells poke out, which fixes what the pair adds to rather than naming a digit.
+Last of all, a shortlist for a cell that has none.
 
 Cage reasoning enumerates whole assignments against each cell's candidates rather than bare subsets
 that add up, which is the difference between running out after two hints and finishing the puzzle.
@@ -128,15 +132,13 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-| given first | finishes | gives up honestly | finishes wrong |
-| --- | --- | --- | --- |
-| nothing | 11 | 19 | **0** |
-| 6 correct digits | 30 | 0 | **0** |
-| 10 correct digits | 30 | 0 | **0** |
+Over **300 blank grids**, hints only: **224 finish (75%)**, 76 give up, **0 finish on a wrong grid**,
+and all 76 stuck boards still have exactly one solution — so nothing a hint placed was ever wrong.
+From six correct digits in it is 30 of 30. A hint costs a few milliseconds.
 
-So it is not a solver: from cold it finishes about a third of puzzles and says so on the rest. Once
-you are six digits in it can always carry you, which is the shape worth having — you are not asking
-for a hint on move one. A hint costs about 1.3 ms.
+Every technique above is exhausted on those 76: not one has a naked pair, a hidden pair, a triple or
+a two-cell region sum left in it. **All 76 need assuming a digit and watching it fail**, which is
+where the ladder deliberately stops — that is the puzzle, not a gap in the hints.
 
 ### Checking your progress
 
