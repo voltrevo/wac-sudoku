@@ -842,16 +842,20 @@ function hunt(cand, pool, noted){
   //    worse than no mark: everything below trusts them.
   for (let i = 0; i < CELLS; i++){
     if (shown(i) || !noted[i]) continue;
-    for (let d = 1; d <= N; d++){
-      if (!(noted[i] & BIT(d)) || (cand[i] & BIT(d))) continue;
-      const blame = blamedBy(i, d);
-      if (!blame) continue;
-      offer(COST.markVsGrid, unnote(i, d, [["t", [blame.at]]],
-        `Look at the pencil marks in the [[a|cell]].`,
-        `One of them cannot be right any more: the [[t|cell]] is already a ${d}, and the two share` +
-        ` a ${blame.what}.`));
-      break;
-    }
+    // Every mark in the cell that has been overtaken, not the first one found.
+    const blames = [1,2,3,4,5,6]
+      .filter(d => (noted[i] & BIT(d)) && !(cand[i] & BIT(d)))
+      .map(d => ({ d, ...(blamedBy(i, d) || {}) }))
+      .filter(x => x.at !== undefined);
+    if (!blames.length) continue;
+    const mask = blames.reduce((m, x) => m | BIT(x.d), 0);
+    offer(COST.markVsGrid, cutAll([i], mask, [["t", blames.map(x => x.at)]],
+      `Look at the pencil marks in the [[a|cell]].`,
+      blames.length === 1
+        ? `One of them cannot be right any more: the [[t|cell]] is already a ${blames[0].d}, and the` +
+          ` two share a ${blames[0].what}.`
+        : `${blames.length} of them cannot be right any more — each of those digits already sits in` +
+          ` one of the [[t|cells]], sharing a row, a column, a box or a cage with this one.`));
   }
 
   // 4. A digit with only one home left in a row, column or box.
@@ -884,19 +888,26 @@ function hunt(cand, pool, noted){
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
+    // The same enumeration prunes every pencilled cell in the cage, so it says so once, grouped by
+    // what they lose.
+    const shed = new Map();
     for (let t = 0; t < c.m; t++){
       const i = c.cells[t];
       if (!noted[i]) continue;
-      {
-        const gone = pool[i] & ~c.per[t];
-        if (!gone) continue;
-        offer(COST.markVsCage, cutAll([i], gone, [["p", cageMembers[k]]],
-          `Look at the [[a|cell]] against the [[p|cage]] it is in.`,
-          `The cage's ${c.m} empty cells must be different digits adding to ${c.need}. Write out the` +
-          ` ways that can happen and throw away any needing a digit a cell cannot take — one of the` +
-          ` marks in the amber cell appear in none of what is left.`));
-      }
+      const gone = pool[i] & ~c.per[t];
+      if (!gone) continue;
+      if (!shed.has(gone)) shed.set(gone, []);
+      shed.get(gone).push(i);
     }
+    if (!shed.size) continue;
+    const [gone, who] = [...shed].sort((a, b) =>
+      countOf(b[0]) * b[1].length - countOf(a[0]) * a[1].length)[0];
+    offer(COST.markVsCage, cutAll(who, gone, [["p", cageMembers[k]]],
+      `Look at the [[p|cage]], and at what you have pencilled in it.`,
+      `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out the ways that` +
+      ` can happen and throw away any needing a digit a cell cannot take — and some of the marks in` +
+      ` ${who.length > 1 ? "the [[a|cells]] appear" : "the [[a|cell]] appear"} in none of what is` +
+      ` left.`));
   }
 
   // 6. The cage's arithmetic pins a cell that its neighbours alone did not.
@@ -1072,33 +1083,26 @@ function hunt(cand, pool, noted){
 
   // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
   //     merely absent. Two steps of reasoning, so it comes late.
-  offer(COST.deepHidden, hiddenIn(tight,
-    `Every empty cell here is pencilled, so the work is done: one of the digits this row, column or` +
-    ` box is still missing has a single cell whose marks include it, and nowhere else to go.`, true));
-
-  // 10b. A cell the cage's allowance and the grid together pin down, though neither does alone.
-  for (let i = 0; i < CELLS; i++){
-    if (shown(i) || oneBit(pool[i]) || !noted[i]) continue;
-    const d = oneBit(tight[i]);
-    if (!d) continue;
-    offer(COST.deepNaked, place(i, d, [["p", cageMembers[cage[i]]]],
-      `Look at the [[a|cell]] — and at the [[p|cage]] it is in.`,
-      `Of the digits you have pencilled there, only one is a digit the cage can actually afford` +
-      ` alongside its other cells.`));
-    break;
-  }
+  /* There is no "deep" tier any more.
+   *
+   * It used to hunt the same way over `tight` — the candidates once each cage's total has been
+   * worked through — and that is exactly the work a hint should not silently demand. Recording it
+   * is a step of its own: `mark vs cage` takes it off a pencilled cell and the shortlists write it
+   * onto a bare one. Once it is on the board the plain hunts above find it, because `pool` counts
+   * the marks. The tier is not missing, it is spelled out.
+   */
 
   nakedSubsets: {
   // 11. Two or three cells in a house sharing two or three options between them. Those digits are
   //     spoken for, wherever they end up going, so nothing else in the house can have them.
   for (const h of REGIONS){
-    const open = h.cells.filter(i => !shown(i) && noted[i] && countOf(tight[i]) >= 2);
+    const open = h.cells.filter(i => !shown(i) && noted[i] && countOf(pool[i]) >= 2);
     for (let a = 0; a < open.length; a++){
       for (let b = a + 1; b < open.length; b++){
-        const pairU = tight[open[a]] | tight[open[b]];
+        const pairU = pool[open[a]] | pool[open[b]];
         const group2 = [open[a], open[b]];
         if (countOf(pairU) === 2){
-          const others = h.cells.filter(i => !shown(i) && !group2.includes(i) && (tight[i] & pairU));
+          const others = h.cells.filter(i => !shown(i) && !group2.includes(i) && (pool[i] & pairU));
           const hit = cutAll(others, pairU, [["t", h.cells], ["p", group2]],
             `Look at the [[t|${h.kind}]] — two of its cells have the same two options.`,
             `The two [[p|cells]] are ${listOf(pairU)} in one order or the other. Between them they` +
@@ -1106,10 +1110,10 @@ function hunt(cand, pool, noted){
           if (hit){ offer(COST.nakedPair, hit); break nakedSubsets; }
         }
         for (let z = b + 1; z < open.length; z++){
-          const u = pairU | tight[open[z]];
+          const u = pairU | pool[open[z]];
           if (countOf(u) !== 3) continue;
           const group = [open[a], open[b], open[z]];
-          const others = h.cells.filter(i => !shown(i) && !group.includes(i) && (tight[i] & u));
+          const others = h.cells.filter(i => !shown(i) && !group.includes(i) && (pool[i] & u));
           const hit = cutAll(others, u, [["t", h.cells], ["p", group]],
             `Look at the [[t|${h.kind}]] — three of its cells share three options.`,
             `The three [[p|cells]] hold ${listOf(u)} between them in some order. All three digits` +
@@ -1132,8 +1136,8 @@ function hunt(cand, pool, noted){
     for (let d = 1; d <= N; d++){
       for (let e = d + 1; e <= N; e++){
         if (h.cells.some(i => shown(i) === d || shown(i) === e)) continue;
-        const sd = h.cells.filter(i => !shown(i) && (tight[i] & BIT(d)));
-        const se = h.cells.filter(i => !shown(i) && (tight[i] & BIT(e)));
+        const sd = h.cells.filter(i => !shown(i) && (pool[i] & BIT(d)));
+        const se = h.cells.filter(i => !shown(i) && (pool[i] & BIT(e)));
         if (sd.length !== 2 || se.length !== 2 || sd[0] !== se[0] || sd[1] !== se[1]) continue;
         const both = BIT(d) | BIT(e);
         const hit = cutAll(sd, ALL & ~both, [["t", h.cells]],
@@ -1157,7 +1161,9 @@ function hunt(cand, pool, noted){
    *     the candidates the way the hidden-single hint already does.
    */
   cornered: {
-    const homesIn = (cells, d) => cells.filter(i => !shown(i) && (tight[i] & BIT(d)));
+    // `pool`, not `tight`: what the placed digits and the player's own marks leave, which is what
+    // they can check by looking. Cage arithmetic on top of that is a second step.
+    const homesIn = (cells, d) => cells.filter(i => !shown(i) && (pool[i] & BIT(d)));
 
     for (let g = 0; g < N; g++){
       for (let d = 1; d <= N; d++){
@@ -1167,7 +1173,7 @@ function hunt(cand, pool, noted){
         for (const [pick, band, label] of [[i => i / N | 0, ROWS, "row"], [i => i % N, COLS, "column"]]){
           const l = pick(sp[0]);
           if (!sp.every(i => pick(i) === l)) continue;
-          const hit = cutAll(band[l].filter(i => !shown(i) && boxOf(i) !== g && (tight[i] & BIT(d))),
+          const hit = cutAll(band[l].filter(i => !shown(i) && boxOf(i) !== g && (pool[i] & BIT(d))),
             BIT(d), [["p", BOXES[g]], ["t", sp]],
             `Look at the [[p|box]] — the only cells in it that can still take a ${d} are the` +
             ` [[t|ones]].`,
@@ -1187,7 +1193,7 @@ function hunt(cand, pool, noted){
           if (sp.length < 2) continue;
           const g = boxOf(sp[0]);
           if (!sp.every(i => boxOf(i) === g)) continue;
-          const hit = cutAll(BOXES[g].filter(i => !shown(i) && !band[l].includes(i) && (tight[i] & BIT(d))),
+          const hit = cutAll(BOXES[g].filter(i => !shown(i) && !band[l].includes(i) && (pool[i] & BIT(d))),
             BIT(d), [["p", BOXES[g]], ["t", sp]],
             `Look at the ${label} — the only cells on it that can still take a ${d} are the` +
             ` [[t|ones]], and they are all inside the [[p|box]].`,
@@ -1205,7 +1211,7 @@ function hunt(cand, pool, noted){
         if (sp.length < 2) continue;
         const k = cage[sp[0]];
         if (!sp.every(i => cage[i] === k)) continue;
-        const vics = cageMembers[k].filter(i => !shown(i) && !h.cells.includes(i) && (tight[i] & BIT(d)));
+        const vics = cageMembers[k].filter(i => !shown(i) && !h.cells.includes(i) && (pool[i] & BIT(d)));
         // Purple is only worth naming if any of the cage is left over once its homes and the cells
         // losing the digit are painted; otherwise the word would point at nothing.
         const showsP = cageMembers[k].some(i => !sp.includes(i) && !vics.includes(i));
@@ -1236,7 +1242,7 @@ function hunt(cand, pool, noted){
     const walk = (t, sum, used) => {
       if (t === open.length){ if (sum !== need) return; used.forEach((d, z) => { per[z] |= BIT(d); }); return; }
       for (let d = 1; d <= N; d++){
-        if (!(tight[open[t]] & BIT(d)) || sum + d > need) continue;
+        if (!(pool[open[t]] & BIT(d)) || sum + d > need) continue;
         used.push(d); walk(t + 1, sum + d, used); used.pop();
       }
     };
@@ -1246,7 +1252,7 @@ function hunt(cand, pool, noted){
      * and one digit tells a quarter of the story. */
     const byMask = new Map();
     for (let t = 0; t < open.length; t++){
-      const gone = tight[open[t]] & ~per[t];
+      const gone = pool[open[t]] & ~per[t];
       if (!gone) continue;
       if (!byMask.has(gone)) byMask.set(gone, []);
       byMask.get(gone).push(open[t]);

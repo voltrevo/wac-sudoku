@@ -112,6 +112,13 @@ unit of progress, not simply cheapest.** A one-candidate elimination and a place
 same size of step, and ranking on effort alone let a cheap argument that rules out a single digit
 beat a dearer one that settles a cell outright. 
 
+**A hint reasons only over what is on the board.** Placed digits, cage totals, and the player's own
+pencil marks — never candidates the engine worked out and the player has not. That rules out a whole
+tier that used to exist: hunting over cage-narrowed candidates found more, but every one of those
+hints was quietly charging the reader for a board-wide sweep. Recording the sweep is itself a step,
+so `mark vs cage` takes the narrowing off a pencilled cell and the shortlists write it onto a bare
+one, and the plain hunts then find what the deep tier used to.
+
 **A hint is one step, not a shortcut past several.** It will not ask you to work out what every
 cage allows in every cell and then hand you a conclusion drawn from it: that work is progress, and
 discarding it to keep only the destination is a bad trade. Where an argument leans on the board
