@@ -847,6 +847,25 @@ function hunt(cand, pool, noted){
     }
   }
 
+  /* **Eliminations land only where the player can see them.**
+   *
+   * Rub the digit out of a mark already on the board, or — where the cell is untouched and the
+   * placed digits rule nothing out in it yet — write "everything but d", which states the
+   * conclusion and not a word more. Anything in between would smuggle in narrowing the player has
+   * not written down, which is why the subset arguments insist on marks for their premises too.
+   */
+  const ALL = (1 << (N + 1)) - 2;
+  const strike = (victim, d, cells, where, why) => {
+    if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
+    if (!noted[victim] && pool[victim] === ALL)
+      return { kind: "note", cell: victim, digits: ALL & ~BIT(d), cells, where, why };
+    return null;
+  };
+  const strikeAny = (victims, d, cells, where, why) => {
+    for (const v of victims){ const h = strike(v, d, cells, where, why); if (h) return h; }
+    return null;
+  };
+
   /* 8. A digit the cage must hold, and one cell that can see everywhere it could go.
    *
    *    Wherever the digit lands inside the cage, that cell is looking straight at it — so it
@@ -863,19 +882,21 @@ function hunt(cand, pool, noted){
       if (!homes.length) continue;
       const line = homes.every(i => (i / N | 0) === (homes[0] / N | 0)) ? `row ${(homes[0] / N | 0) + 1}`
                  : homes.every(i => i % N === homes[0] % N) ? `column ${homes[0] % N + 1}` : null;
+      const watchers = [];
       for (let x = 0; x < CELLS; x++){
-        if (shown(x) || cage[x] === k || !(noted[x] & BIT(d))) continue;
-        if (!homes.every(h => sees(x, h))) continue;
-        offer(COST.seesAllHomes, { kind: "unnote", cell: x, digit: d, cells: [...cageMembers[k], x],
-          where: `Look at the cage totalling ${sums[k]} — and at where its ${d} can go.`,
-          why: line
-            ? `It cannot do without a ${d}, and wherever that ${d} lands in the cage it lands on` +
-              ` ${line}. So the ${line} copy is already spoken for, and no cell outside the cage on` +
-              ` it can be ${d}.`
-            : `It cannot do without a ${d}, and the only cells that could take it are` +
-              ` ${listNames(homes.map(cellName))}. ${cellName(x)} shares a row, a column or a box` +
-              ` with every one of them, so wherever that ${d} goes, ${cellName(x)} is looking at it.` });
+        if (shown(x) || cage[x] === k || !(pool[x] & BIT(d))) continue;
+        if (homes.every(h => sees(x, h))) watchers.push(x);
       }
+      const seen = strikeAny(watchers, d, [...cageMembers[k], ...watchers],
+        `Look at the cage totalling ${sums[k]} — and at where its ${d} can go.`,
+        line
+          ? `It cannot do without a ${d}, and wherever that ${d} lands in the cage it lands on` +
+            ` ${line}. So the ${line} copy is already spoken for, and no cell outside the cage on` +
+            ` it can be ${d}.`
+          : `It cannot do without a ${d}, and the only cells that could take it are` +
+            ` ${listNames(homes.map(cellName))}. A cell sharing a row, a column or a box with every` +
+            ` one of them is looking at that ${d} wherever it goes, so it cannot be ${d} itself.`);
+      if (seen) offer(COST.seesAllHomes, seen);
     }
   }
 
@@ -952,35 +973,6 @@ function hunt(cand, pool, noted){
       ` afford alongside its other cells. One survives.`));
     break;
   }
-
-  /* **Everything below works only on cells the player has pencilled.**
-   *
-   * A hint is one step, and it may not smuggle a second one in as its premise. Saying "these two
-   * are 1 and 4 in some order" about two blank cells hands over a real deduction for free and then
-   * reasons on top of it — the hint would be worth less than the giveaway carrying it.
-   *
-   * Once a cell is marked the premise is the player's own: they wrote it, they can see it, and the
-   * hint is genuinely the one step that follows. So an elimination only ever rubs a digit out of
-   * marks that are already on the board, and the subset arguments only count cells that carry them.
-   * Where nothing is marked yet, the shortlist at the bottom is the way in.
-   *
-   * Reading `tight` rather than the marks directly is safe here: any mark the grid or a cage has
-   * already ruled out is caught further up, so by this point they agree on every marked cell.
-   */
-  const ALL = (1 << (N + 1)) - 2;
-  const strike = (victim, d, cells, where, why) => {
-    if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
-    /* A cell nobody has written on, with all six still open, can take the elimination as a
-     * shortlist instead: "everything but d" states the conclusion and not a word more. Any
-     * narrower and writing what is left would smuggle in the narrowing too. */
-    if (!noted[victim] && tight[victim] === ALL)
-      return { kind: "note", cell: victim, digits: ALL & ~BIT(d), cells, where, why };
-    return null;
-  };
-  const strikeAny = (victims, d, cells, where, why) => {
-    for (const v of victims){ const h = strike(v, d, cells, where, why); if (h) return h; }
-    return null;
-  };
 
   nakedSubsets: {
   // 11. Two or three cells in a house sharing two or three options between them. Those digits are
@@ -1127,7 +1119,7 @@ function hunt(cand, pool, noted){
     if (open.length < 2 || open.length > 4) continue;
     /* Marked, or bare with all six still open — reading "any digit" off an untouched cell asserts
      * nothing, where reading four off one narrows it in a way the player has not written down. */
-    if (open.some(i => !noted[i] && tight[i] !== ALL)) continue;
+    if (open.some(i => !noted[i] && pool[i] !== ALL)) continue;
     const need = factNeed(f);
     if (need < 1 || need > open.length * N) continue;
     const per = new Array(open.length).fill(0);
