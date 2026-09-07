@@ -120,7 +120,10 @@ involved carry your marks, and an elimination only ever rubs a digit out of a ma
 board: **naked pairs and triples**, **hidden pairs**, and the 21 rule where **two** cells poke out,
 which fixes what the pair adds to rather than naming a digit.
 
-Last of all, a shortlist for a cell that has no marks — which is the way in.
+Last of all, a shortlist for a cell that has no marks — any shortlist, even five digits out of six.
+Ruling out one digit is worth having when the alternative is nothing, and since everything above
+needs marks to work on, this is the way in as much as it is a hint. Unlike the arguments above, the
+options *are* the hint here rather than an unstated premise underneath one.
 
 Cage reasoning enumerates whole assignments against each cell's candidates rather than bare subsets
 that add up, which is the difference between running out after two hints and finishing the puzzle.
@@ -137,14 +140,15 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-Over **300 blank grids**, hints only: **150 finish (50%)**, 150 give up, **0 finish on a wrong
-grid**, and all 150 stuck boards still have exactly one solution — so nothing a hint placed was ever
-wrong. From six correct digits in it is 30 of 30. A hint costs a few milliseconds.
+Over **300 blank grids**, hints only: **208 finish (69%)**, 92 give up, **0 finish on a wrong
+grid**, and all 92 stuck boards still have exactly one solution — so nothing a hint placed was ever
+wrong. From four correct digits in it is 30 of 30. A hint costs a few milliseconds.
 
-A blank grid is the worst case for the ladder by design, since nothing is pencilled and the
-eliminations have nowhere to land. Letting them run on cells the player had not marked took that
-figure to 75%, and the extra 25% was bought by giving deductions away — which is not what a hint is
-for.
+A blank grid is the worst case by design, since nothing is pencilled and the eliminations have
+nowhere to land. Letting them run on cells the player had *not* marked would reach 75%, but that
+25% is bought by giving deductions away, which is not what a hint is for. Letting the shortlist
+offer any length instead — where the options are the hint rather than its hidden premise — gets most
+of it back honestly.
 
 ### Checking your progress
 

@@ -964,16 +964,22 @@ function hunt(cand, pool, noted){
 
   // 14. Nothing places or rubs out. Narrowing a bare cell to a short list is still a step, and it
   //     is the one that turns a blank grid into something to reason about.
-  for (const limit of [2, 3]){
+  /* Shortest list first, but any list will do. Ruling out even one digit is worth having when the
+   * alternative is nothing, and everything above this point needs marks on the board to work on —
+   * so this is the way in as much as it is a hint. Unlike the arguments above, the options *are*
+   * the hint here rather than an unstated premise smuggled underneath one. */
+  for (const limit of [2, 3, 4, 5]){
     for (let i = 0; i < CELLS; i++){
       if (shown(i) || noted[i]) continue;
       const n = countOf(tight[i]);
       if (n !== limit) continue;
       return { kind: "note", cell: i, digits: tight[i], cells: [i],
-        where: `Look at ${cellName(i)} — it has fewer options than it looks.`,
+        where: n <= 3 ? `Look at ${cellName(i)} — it has fewer options than it looks.`
+                      : `Look at ${cellName(i)} — not everything can go there.`,
         why: `Take out everything its row, column and box already hold, then everything its cage` +
-             ` cannot afford alongside its other cells. Only ${n} digits survive, and pencilling` +
-             ` them in is what makes the next step visible.` };
+             ` cannot afford alongside its other cells. ${n === N - 1 ? "One digit falls away" :
+             `Only ${n} digits survive`}, and pencilling what is left is what lets the sharper` +
+             ` arguments get a grip.` };
     }
   }
 
@@ -1756,8 +1762,9 @@ function hintHelpHTML(){
        the row; <b>two digits with only the same two homes</b>, which makes those cells exactly
        those digits; and the 21 rule again where <b>two</b> cells poke out, which does not name a
        digit but fixes what the pair adds to.</p>
-    <p>Last of all, a shortlist for a cell that has no marks — which is the way in. Pencil a few
-       cells and the rest of the ladder opens up.</p>
+    <p>Last of all, a shortlist for a cell that has no marks. Even ruling out a single digit counts
+       here: everything above needs marks on the board to work on, so this is the way in as much as
+       it is a hint. Pencil a few cells and the rest of the ladder gets a grip.</p>
     <p>Past that it stops. What is left needs assuming something and seeing it fail, which is the
        puzzle rather than a gap in the hints.</p>
     <h4>When it has nothing</h4>
