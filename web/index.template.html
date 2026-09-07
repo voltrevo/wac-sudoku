@@ -52,6 +52,12 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
   text-decoration:none;white-space:nowrap}
 .menu button:active,.menu button:hover,.menu a:active,.menu a:hover{background:var(--peer)}
 .msep{height:1px;background:var(--keyb);margin:4px 8px}
+.mrow{display:flex;align-items:stretch;gap:3px}
+.mrow > button:first-child{flex:1;min-width:0}
+.qmark{flex:0 0 auto;width:34px;padding:0;border:1px solid var(--keyb);border-radius:9px;
+  background:none;color:var(--dim);font:inherit;font-size:14px;font-weight:700;text-align:center;
+  cursor:pointer}
+.qmark:hover,.qmark:active{background:var(--peer);color:var(--ink)}
 
 /* ---- history ---- */
 .sheet{position:fixed;inset:0;z-index:30;background:var(--bg);display:flex;flex-direction:column;
@@ -137,6 +143,11 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
 /* Worked out from what you entered, not typed by you — and not yours to type over. */
 .cell.derived{color:var(--derived);font-weight:400}
 .cell.derived.bad{color:var(--bad)}
+/* A corner dot rather than a background, so a check does not fight the selection highlight. */
+.cell.ok::after,.cell.nope::after{content:"";position:absolute;right:4px;bottom:4px;
+  width:9px;height:9px;border-radius:50%}
+.cell.ok::after{background:var(--good)}
+.cell.nope::after{background:var(--bad)}
 .cell .n{position:absolute;inset:31% 5% 5%;display:grid;
   grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
   font-size:clamp(7px,2.4vw,10px);font-weight:600;color:var(--dim);line-height:1;pointer-events:none}
@@ -195,6 +206,11 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
       <span id="timer">0:00</span>
       <button id="menu" type="button" aria-label="Menu" aria-expanded="false" aria-haspopup="true">☰</button>
       <nav class="menu" id="menupanel" hidden>
+        <div class="mrow">
+          <button id="mcheck" type="button">✅&nbsp; Check progress</button>
+          <button id="mcheckhelp" class="qmark" type="button"
+                  aria-label="What does checking your progress do?">?</button>
+        </div>
         <button id="mhistory" type="button">🕘&nbsp; History</button>
         <button id="mhowto" type="button">📖&nbsp; How to play</button>
         <button id="msettings" type="button">⚙️&nbsp; Settings</button>
@@ -389,6 +405,9 @@ let seedText = "", t0 = 0, ticking = false, elapsed = 0;
 /* Kept apart from `elapsed` because Clear resets the clock, and starting a solved puzzle over
  * should not un-solve it in the history. Both are seconds; `solvedAt` is unix time. */
 let solvedAt = 0, solvedIn = 0;
+/* Null until asked for, and thrown away again the moment anything changes — a stale verdict on a
+ * grid that has moved on would be worse than none. */
+let check = null;
 
 const cellEls = [];
 for (let i = 0; i < CELLS; i++){
@@ -496,6 +515,17 @@ function conflicts(){
   return bad;
 }
 
+/* **The one thing besides Reveal that consults the answer**, which is why it is a deliberate menu
+ * action with an explainer beside it rather than something always on. It judges only the digits the
+ * player entered — not pencil marks, and not cells the assist worked out, which are consequences of
+ * entries rather than decisions. It says *that* a digit is wrong, never what belongs there. */
+function runCheck(){
+  if (!solution) return;
+  check = new Array(CELLS).fill(0);
+  for (let i = 0; i < CELLS; i++) if (val[i]) check[i] = val[i] === solution[i] ? 1 : -1;
+  draw();
+}
+
 function draw(){
   deriveAuto();
   const bad = conflicts();
@@ -510,6 +540,8 @@ function draw(){
     el.classList.toggle("same", i !== sel && !!v && v === selV);
     el.classList.toggle("bad",  bad.has(i));
     el.classList.toggle("derived", !val[i] && !!auto[i]);
+    el.classList.toggle("ok",   !!check && check[i] === 1);
+    el.classList.toggle("nope", !!check && check[i] === -1);
     el.firstChild.textContent = v ? v : "";
     let n = "";
     if (!v) for (let d = 1; d <= N; d++) n += `<span>${notes[i].has(d) ? d : ""}</span>`;
@@ -535,8 +567,15 @@ function draw(){
     $("msg").className = "msg win";
     $("msg").textContent = revealed ? "Solved — with the answer shown." : `Solved in ${clock()}. 🎉`;
   }
+  else if (check){
+    const right = check.filter(c => c === 1).length, wrong = check.filter(c => c === -1).length;
+    $("msg").className = "msg" + (wrong ? " warn" : "");
+    $("msg").textContent = !right && !wrong ? "Nothing of yours to check yet."
+      : wrong ? `${wrong} wrong, ${right} right.`
+      : `All ${right} of your digits are right.`;
+  }
   else if (bad.size){ $("msg").className = "msg warn"; $("msg").textContent = "Something clashes."; }
-  else { $("msg").className = "msg"; $("msg").textContent = full ? "" : ""; }
+  else { $("msg").className = "msg"; $("msg").textContent = ""; }
   save();
 }
 
@@ -549,7 +588,7 @@ function select(i){ sel = i; start(); draw(); }
 function begin(){ batch = []; }
 function touch(i){ if (batch) batch.push({ i, v: val[i], n: new Set(notes[i]) }); }
 function commit(){
-  if (batch && batch.length){ undoStack.push(batch); dirty = true; }
+  if (batch && batch.length){ undoStack.push(batch); dirty = true; check = null; }
   batch = null;
 }
 
@@ -602,7 +641,7 @@ function clearAll(){
 
 function undo(){
   if (!undoStack.length) return;
-  dirty = true;
+  dirty = true; check = null;
   const b = undoStack.pop();
   // Backwards, so a cell touched twice in one action comes back as it was before the action.
   for (let k = b.length - 1; k >= 0; k--){ val[b[k].i] = b[k].v; notes[b[k].i] = b[k].n; }
@@ -897,7 +936,7 @@ function build(text){
   auto = new Array(CELLS).fill(0);
   notes = Array.from({ length: CELLS }, () => new Set());
   undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
-  solvedAt = 0; solvedIn = 0; dirty = false;
+  solvedAt = 0; solvedIn = 0; dirty = false; check = null;
   load();
   remember(seedText);
   $("cages").innerHTML = cageSvg(cage, sums);
@@ -1033,6 +1072,9 @@ function howtoHTML(){
           you what the digit should have been.</li>
       <li><b>Settings</b> has an opt-in that fills in cells whose digit is forced by what you have
           already entered. Off by default, and it cascades — read the note beside it first.</li>
+      <li><b>Check progress</b> in the menu marks your entered digits right or wrong. It is the only
+          thing besides Reveal that looks at the answer; the <b>?</b> beside it says what that
+          costs.</li>
     </ul>
     <h4>Seeds</h4>
     <p>A puzzle's name is a word pair and a number, like <code>brisk-otter-07</code>. The same name
@@ -1046,6 +1088,39 @@ function howtoHTML(){
     <p><code>1</code>–<code>6</code> place, arrows move, <code>Backspace</code> erases,
        <code>N</code> toggles notes, <code>U</code> undoes, <code>[</code> and <code>]</code> step
        between puzzles, <code>Esc</code> closes a panel.</p>
+  </div>`;
+}
+
+function checkHelpHTML(){
+  return `<div class="prose">
+    <p><b>Checking puts a dot in the corner of every digit you have entered</b>: green where it is
+       right, red where it is not.</p>
+    <p>The dot is the only thing checking changes. A digit shown in <b>red</b> still means what it
+       always means — that the board breaks a rule there. So a green dot on a red digit is not a
+       contradiction: that digit is right, and something <em>else</em> on the board is clashing with
+       it. Which is often the most useful thing a check can tell you.</p>
+    <h4>What it costs you</h4>
+    <p>Everything else in this app works only from the rules and from what you have entered. Red
+       normally means the board <em>breaks a rule</em> — a repeat, or a cage that cannot add up — and
+       a digit can be wrong without breaking anything yet.</p>
+    <p>Checking is different. It is the only thing besides <b>Reveal</b> that looks at the answer. It
+       will tell you a digit is wrong when nothing on the board could have told you that, so a
+       mistake you would have found later gets found now. If you would rather that stayed yours to
+       find, do not use it.</p>
+    <p>It never tells you what the digit should have been.</p>
+    <h4>What it does not judge</h4>
+    <ul>
+      <li><b>Pencil marks are left alone.</b> They are working, not answers, and a mark that turns
+          out to be wrong is a normal part of getting there.</li>
+      <li><b>Cells the assist worked out are not marked.</b> Those follow from your entries rather
+          than being decisions of yours — if one is wrong, an entry it came from is wrong, and that
+          is the one marked.</li>
+      <li>Empty cells are not marked. Being behind is not being wrong.</li>
+    </ul>
+    <h4>How long it lasts</h4>
+    <p>Until you change something. The moment you enter, erase, undo or clear anything, the marks go
+       — a verdict on a grid that has moved on is worse than none. Check again whenever you like;
+       nothing is counted and nothing is saved.</p>
   </div>`;
 }
 
@@ -1100,6 +1175,12 @@ $("erase").addEventListener("click", erase);
 $("undo").addEventListener("click", undo);
 $("clear").addEventListener("click", clearAll);
 $("menu").addEventListener("click", e => { e.stopPropagation(); openMenu($("menupanel").hidden); });
+$("mcheck").addEventListener("click", () => { openMenu(false); runCheck(); });
+$("mcheckhelp").addEventListener("click", e => {
+  e.stopPropagation();                       // the label runs the check; the mark explains it
+  openMenu(false);
+  showSheet("Checking your progress", checkHelpHTML());
+});
 $("mhistory").addEventListener("click", () => { openMenu(false); openHistory(); });
 $("mhowto").addEventListener("click", () => { openMenu(false); showSheet("How to play", howtoHTML()); });
 $("msettings").addEventListener("click", () => { openMenu(false); openSettings(); });

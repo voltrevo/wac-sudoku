@@ -80,6 +80,23 @@ did not make. A cell that nothing fits is left alone, because saying so is the c
 job. And a cage whose total demands a digit that is illegal there is left alone rather than filled
 with a knowingly wrong one.
 
+### Checking your progress
+
+**Check progress** in the menu marks the digits you have entered — a green dot in the corner where
+the digit is right, a red one where it is not. The **?** beside it in the menu opens the explanation
+rather than running the check, so nobody finds out what it costs by using it.
+
+It is the only thing besides Reveal that looks at the answer, and the explainer says so. It never
+says what the digit should have been.
+
+The dot is all it changes. A digit shown in red still means the board *breaks a rule* there, so a
+green dot on a red digit is not a contradiction — that digit is right and something else is clashing
+with it, which is often the most useful thing a check can say. Pencil marks are not judged: they are
+working, not answers. Cells the assist worked out are not judged either, since they follow from
+entries rather than being decisions; if one is wrong, the entry it came from is what gets marked.
+
+The marks last until you change anything, and nothing about a check is counted or saved.
+
 ### Not spoiling it
 
 Everything the app tells you comes from the **rules**, never from the answer: a repeated digit in a
