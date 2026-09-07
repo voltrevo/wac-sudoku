@@ -49,6 +49,9 @@ in the page never reads the solution, so a red cell says *this cannot stand*, no
 been a 4*. The solution is read in exactly one function, behind a two-step confirmation — and if
 you take it, the finishing message says so rather than congratulating you.
 
+Showing it is not a one-way door: **Undo** puts your own grid back, and **Clear** starts the puzzle
+over. Revealing is recorded on the undo stack like any other action.
+
 ## What is here
 
 ```

@@ -150,8 +150,8 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
   </div>
 
   <div class="confirm" id="confirm">
-    <p><strong>Show the answer?</strong> This fills the whole grid in. You can't un-see it —
-       your progress on this puzzle is kept, but the puzzle is over.</p>
+    <p><strong>Show the answer?</strong> This fills the whole grid in. You can't un-see it, though
+       Undo puts your own grid back and Clear starts the puzzle over.</p>
     <div class="row">
       <button id="cancel" type="button">Keep playing</button>
       <button id="yes" type="button" class="danger">Show me</button>
@@ -363,6 +363,7 @@ function draw(){
     b.lastChild.textContent = left[d] > 0 ? left[d] : "";
   }
   $("undo").disabled = undoStack.length === 0;
+  $("reveal").disabled = revealed;
   const full = val.every(v => v > 0);
   const won = full && bad.size === 0;
   $("board").classList.toggle("done", won);
@@ -416,14 +417,16 @@ function erase(){
   draw();
 }
 
-/** Start this puzzle again. One undo away, clock included, so it needs no confirmation. */
+/* Start this puzzle again. One undo away, clock included, so it needs no confirmation — and it is
+ * the way back out of a revealed board, which is otherwise a state with no exit. */
 function clearAll(){
-  if (revealed) return;
-  if (!val.some(v => v) && !notes.some(n => n.size)) return;
+  if (!revealed && !val.some(v => v) && !notes.some(n => n.size)) return;
   begin();
   for (let i = 0; i < CELLS; i++){ touch(i); val[i] = 0; notes[i].clear(); }
   batch.clock = elapsed + (ticking ? Date.now() - t0 : 0);
+  batch.revealed = revealed;
   commit();
+  revealed = false;
   elapsed = 0; if (ticking) t0 = Date.now();
   draw();
 }
@@ -434,6 +437,8 @@ function undo(){
   // Backwards, so a cell touched twice in one action comes back as it was before the action.
   for (let k = b.length - 1; k >= 0; k--){ val[b[k].i] = b[k].v; notes[b[k].i] = b[k].n; }
   if (b.clock !== undefined){ elapsed = b.clock; if (ticking) t0 = Date.now(); }
+  // Only the two actions that touch these record them, so an ordinary undo leaves the clock alone.
+  if (b.revealed !== undefined) revealed = b.revealed;
   sel = b[0].i;
   draw();
 }
@@ -521,11 +526,19 @@ function build(text){
 /** Next and Prev walk the number, keeping the name. */
 function step(d){ const { base, n } = splitSeed(seedText); build(seedName(base, n + d)); }
 
+/* Recorded on the stack like anything else. Emptying it here left the board full, every edit
+ * refused because `revealed` was set, and no way back — and it was saved, so a reload restored
+ * the dead end rather than clearing it. */
 function reveal(){
+  begin();
+  for (let i = 0; i < CELLS; i++) touch(i);
+  batch.clock = elapsed + (ticking ? Date.now() - t0 : 0);
+  batch.revealed = revealed;
+  commit();
   stop();
   revealed = true;
   for (let i = 0; i < CELLS; i++){ val[i] = solution[i]; notes[i].clear(); }
-  undoStack = []; sel = -1;
+  sel = -1;
   $("confirm").classList.remove("on");
   draw();
 }
