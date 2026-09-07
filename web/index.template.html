@@ -669,9 +669,42 @@ function blamedBy(i, d){
   return null;
 }
 
-/** The cascade itself, over whatever the caller is willing to believe. Returns null if nothing
- *  in it applies — `findHint` decides what that silence means. */
+/**
+ * **How hard each argument is to follow, in one place.**
+ *
+ * The order the techniques happen to be written in is not a hierarchy — it only looked like one
+ * while first-match-wins was picking the answer, and it quietly preferred a two-step candidate
+ * argument over a two-cell cage adding to 4. Every technique now *offers* what it finds with a
+ * price on it, and the cheapest offer is the hint.
+ *
+ * The numbers are a judgement, but an auditable one in a single place: they rise with how many
+ * separate facts you must hold at once, plus a little for how much of the board you have to take
+ * in to check it.
+ */
+const COST = {
+  cageLast:      10,   // one total, one subtraction
+  cageShortlist: 12,   // a small cage's total, and the only ways to make it
+  nakedSingle:   14,   // one cell against its four houses
+  markVsGrid:    16,   // a mark with a digit already staring at it
+  hiddenSingle:  22,   // one house, one digit with one home left
+  regionOne:     26,   // 21 less the cages inside, one cell over
+  cagePins:      34,   // write out one cage's completions
+  markVsCage:    36,
+  cageMust:      38,
+  regionCut:     44,   // the same arithmetic, more than one cell over
+  seesAllHomes:  50,
+  nakedPair:     56,
+  hiddenPair:    62,
+  nakedTriple:   68,
+  deepHidden:    76,   // cage narrowing first, then the house scan
+  deepNaked:     80,
+  shortlist:     92,   // last resort: whatever is left after everything else
+};
+
+/** The cascade. Every technique offers; `hunt` returns the cheapest offer. */
 function hunt(cand, pool, noted){
+  const offers = [];
+  const offer = (cost, h) => { if (h) offers.push({ ...h, cost: cost + h.cells.length / 8 }); };
   const cages = sums.map((_, k) => cagePlacements(k, pool));
   const place = (cell, digit, cells, where, why) => ({ kind: "place", cell, digit, cells, where, why });
   const unnote = (cell, digit, cells, where, why) => ({ kind: "unnote", cell, digit, cells, where, why });
@@ -687,10 +720,11 @@ function hunt(cand, pool, noted){
         where: `The cage totalling ${sums[k]} cannot be finished.`,
         why: `It has one cell left and needs ${d} in it, which is not a digit. Something already` +
              ` in this cage is wrong.` };
-    return place(c.cells[0], d, cageMembers[k],
+    offer(COST.cageLast, place(c.cells[0], d, cageMembers[k],
       `The cage totalling ${sums[k]} has one cell left.`,
       `You know what it adds to and you know every other digit in it, so the last one is whatever` +
-      ` is missing.`);
+      ` is missing.`));
+    break;
   }
 
   // 2. One digit left for a cell — counting the player's own marks as the assertion they are.
@@ -698,12 +732,13 @@ function hunt(cand, pool, noted){
     if (shown(i)) continue;
     const d = oneBit(pool[i]);
     if (!d) continue;
-    return place(i, d, [i], `Look at ${cellName(i)}.`,
+    offer(COST.nakedSingle, place(i, d, [i], `Look at ${cellName(i)}.`,
       noted[i] && countOf(cand[i]) > 1
         ? `You have pencilled it down to a short list, and everything on that list except one digit`
           + ` is now taken by its row, column, box or cage.`
         : `Between its row, its column, its box and its cage, every digit but one is already taken.`
-          + ` Work through 1 to 6 and only one survives.`);
+          + ` Work through 1 to 6 and only one survives.`));
+    break;
   }
 
   // 3. A pencil mark that cannot stand any more. Rubbing one out is progress, and a stale mark is
@@ -714,8 +749,9 @@ function hunt(cand, pool, noted){
       if (!(noted[i] & BIT(d)) || (cand[i] & BIT(d))) continue;
       const blame = blamedBy(i, d);
       if (!blame) continue;
-      return unnote(i, d, [i], `Look at your pencil marks in ${cellName(i)}.`,
-        `One of them cannot be right any more — ${blame}.`);
+      offer(COST.markVsGrid, unnote(i, d, [i], `Look at your pencil marks in ${cellName(i)}.`,
+        `One of them cannot be right any more — ${blame}.`));
+      break;
     }
   }
 
@@ -733,11 +769,10 @@ function hunt(cand, pool, noted){
     }
     return null;
   };
-  const plain = hiddenIn(pool,
+  offer(COST.hiddenSingle, hiddenIn(pool,
     `Every row, column and box holds each of 1 to 6 exactly once. One of the digits this one is` +
     ` still missing has a single empty cell left that can take it — try each missing digit in turn` +
-    ` and see where it could go.`);
-  if (plain) return plain;
+    ` and see where it could go.`));
 
   // 5. A mark the cage's arithmetic rules out, which the grid alone does not.
   for (let k = 0; k < sums.length; k++){
@@ -748,11 +783,12 @@ function hunt(cand, pool, noted){
       if (!noted[i]) continue;
       for (let d = 1; d <= N; d++){
         if (!(pool[i] & BIT(d)) || (c.per[t] & BIT(d))) continue;
-        return unnote(i, d, cageMembers[k],
+        offer(COST.markVsCage, unnote(i, d, cageMembers[k],
           `Look at ${cellName(i)} against the cage totalling ${sums[k]}.`,
           `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out the ways` +
           ` that can happen and throw away any needing a digit a cell cannot take — one of your` +
-          ` marks here appears in none of what is left.`);
+          ` marks here appears in none of what is left.`));
+        break;
       }
     }
   }
@@ -764,10 +800,11 @@ function hunt(cand, pool, noted){
     for (let t = 0; t < c.m; t++){
       const i = c.cells[t], d = oneBit(c.per[t]);
       if (!d || oneBit(pool[i])) continue;
-      return place(i, d, cageMembers[k], `Look at the cage totalling ${sums[k]}.`,
+      offer(COST.cagePins, place(i, d, cageMembers[k], `Look at the cage totalling ${sums[k]}.`,
         `Its ${c.m} empty cells must be ${c.m} different digits adding to ${c.need}. Write out the` +
         ` ways that can happen, and throw away any that need a digit a cell cannot take. Every one` +
-        ` that is left puts the same digit in ${cellName(i)}.`);
+        ` that is left puts the same digit in ${cellName(i)}.`));
+      break;
     }
   }
 
@@ -780,11 +817,12 @@ function hunt(cand, pool, noted){
       if (!(c.must & BIT(d))) continue;
       const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
       if (spots.length !== 1 || oneBit(pool[spots[0]])) continue;
-      return place(spots[0], d, cageMembers[k],
+      offer(COST.cageMust, place(spots[0], d, cageMembers[k],
         `Look at the cage totalling ${sums[k]} — and at what it cannot do without.`,
         `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out every way` +
         ` that can happen: one digit turns up in all of them, so the cage must hold it — and only` +
-        ` one of its cells can.`);
+        ` one of its cells can.`));
+      break;
     }
   }
 
@@ -807,7 +845,7 @@ function hunt(cand, pool, noted){
       for (let x = 0; x < CELLS; x++){
         if (shown(x) || cage[x] === k || !(noted[x] & BIT(d))) continue;
         if (!homes.every(h => sees(x, h))) continue;
-        return { kind: "unnote", cell: x, digit: d, cells: [...cageMembers[k], x],
+        offer(COST.seesAllHomes, { kind: "unnote", cell: x, digit: d, cells: [...cageMembers[k], x],
           where: `Look at the cage totalling ${sums[k]} — and at where its ${d} can go.`,
           why: line
             ? `It cannot do without a ${d}, and wherever that ${d} lands in the cage it lands on` +
@@ -815,7 +853,7 @@ function hunt(cand, pool, noted){
               ` it can be ${d}.`
             : `It cannot do without a ${d}, and the only cells that could take it are` +
               ` ${listNames(homes.map(cellName))}. ${cellName(x)} shares a row, a column or a box` +
-              ` with every one of them, so wherever that ${d} goes, ${cellName(x)} is looking at it.` };
+              ` with every one of them, so wherever that ${d} goes, ${cellName(x)} is looking at it.` });
       }
     }
   }
@@ -864,8 +902,9 @@ function hunt(cand, pool, noted){
     if (open.length !== 1) continue;
     const d = factNeed(f);
     if (d < 1 || d > N || oneBit(pool[open[0]])) continue;
-    return place(open[0], d, f.span, f.where,
-      `${f.lead} a single cell — so ${cellName(open[0])} is what the arithmetic leaves over.`);
+    offer(COST.regionOne + 8 * (f.k - 1), place(open[0], d, f.span, f.where,
+      `${f.lead} a single cell — so ${cellName(open[0])} is what the arithmetic leaves over.`));
+    break;
   }
 
   const tight = pool.slice();
@@ -877,11 +916,21 @@ function hunt(cand, pool, noted){
 
   // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
   //     merely absent. Two steps of reasoning, so it comes late.
-  const deep = hiddenIn(tight,
+  offer(COST.deepHidden, hiddenIn(tight,
     `Work out first what each cage's total allows in each of its cells — that rules out more than` +
     ` the grid alone does. Once it is ruled out, one of the digits this row, column or box is` +
-    ` missing has only a single cell left that can take it.`);
-  if (deep) return deep;
+    ` missing has only a single cell left that can take it.`));
+
+  // 10b. A cell the cage's allowance and the grid together pin down, though neither does alone.
+  for (let i = 0; i < CELLS; i++){
+    if (shown(i) || oneBit(pool[i])) continue;
+    const d = oneBit(tight[i]);
+    if (!d) continue;
+    offer(COST.deepNaked, place(i, d, [i], `Look at ${cellName(i)} — and at the cage it is in.`,
+      `Take the digits its row, column and box still allow, then keep only those its cage can` +
+      ` afford alongside its other cells. One survives.`));
+    break;
+  }
 
   /* **Everything below works only on cells the player has pencilled.**
    *
@@ -904,6 +953,7 @@ function hunt(cand, pool, noted){
     return null;
   };
 
+  nakedSubsets: {
   // 11. Two or three cells in a house sharing two or three options between them. Those digits are
   //     spoken for, wherever they end up going, so nothing else in the house can have them.
   for (const h of REGIONS){
@@ -919,7 +969,7 @@ function hunt(cand, pool, noted){
               `Look at ${h.name} — two of its cells have the same two options.`,
               `${cellName(group2[0])} and ${cellName(group2[1])} are ${listOf(pairU)} in one order or` +
               ` the other. Between them they use up both, so nothing else in ${h.name} can be either.`);
-            if (hit) return hit;
+            if (hit){ offer(COST.nakedPair, hit); break nakedSubsets; }
           }
         }
         for (let z = b + 1; z < open.length; z++){
@@ -932,13 +982,16 @@ function hunt(cand, pool, noted){
               `Look at ${h.name} — three of its cells share three options.`,
               `${group.map(cellName).join(", ")} hold ${listOf(u)} between them in some order. All` +
               ` three digits are spoken for, so nothing else in ${h.name} can be any of them.`);
-            if (hit) return hit;
+            if (hit){ offer(COST.nakedTriple, hit); break nakedSubsets; }
           }
         }
       }
     }
   }
 
+  }
+
+  hiddenPairs: {
   // 12. Two digits with the same two homes in a house. Those two cells are those two digits, so
   //     everything else can come out of them.
   for (const h of REGIONS){
@@ -960,12 +1013,15 @@ function hunt(cand, pool, noted){
             `Look at ${h.name} — two digits with only the same two homes.`,
             `${d} and ${e} can each only go in ${cellName(sd[0])} or ${cellName(sd[1])}. Two digits` +
             ` and two cells, so between them those cells are ${d} and ${e} — and nothing else.`);
-          if (hit) return hit;
+          if (hit){ offer(COST.hiddenPair, hit); break hiddenPairs; }
         }
       }
     }
   }
 
+  }
+
+  regionCuts: {
   /* 13. The same arithmetic where more than one cell is left over. That does not name a digit,
    *     but knowing what a handful of cells add to still rules plenty out — and since it reads
    *     their options, every one of them has to be pencilled.
@@ -993,30 +1049,54 @@ function hunt(cand, pool, noted){
         `${f.lead} ${open.length === f.cells.length ? "" : "some cells you already have, and "}` +
         `${listNames(open.map(cellName))} — so those add to ${need}. No way of making ${need}` +
         ` out of what you have pencilled in them puts ${d} in ${cellName(open[t])}.`);
-      if (hit) return hit;
+      if (hit){ offer(COST.regionCut + 8 * (f.k - 1) + 4 * (open.length - 2), hit); break regionCuts; }
     }
+  }
   }
 
   /* Shortest list first, but any list will do. Ruling out even one digit is worth having when the
    * alternative is nothing, and everything above this point needs marks on the board to work on —
    * so this is the way in as much as it is a hint. Unlike the arguments above, the options *are*
    * the hint here rather than an unstated premise smuggled underneath one. */
+  /* A small cage's total does this on its own — two cells adding to 4 can only be 1 and 3 — and
+   * that is the classic first move in a killer grid, not a last resort. It is worth separating
+   * from the shortlist that needs the whole board's narrowing to arrive at the same place. */
+  for (let k = 0; k < sums.length; k++){
+    const c = cages[k];
+    if (!c || !c.any || c.m < 2 || c.m > 3) continue;
+    for (let t = 0; t < c.m; t++){
+      const i = c.cells[t];
+      if (shown(i) || noted[i]) continue;
+      const n = countOf(c.per[t]);
+      if (n < 2 || n > 3 || n >= countOf(cand[i])) continue;
+      offer(COST.cageShortlist + n, { kind: "note", cell: i, digits: c.per[t], cells: cageMembers[k],
+        where: `Look at the cage totalling ${sums[k]}.`,
+        why: `Its ${c.m} cells must be ${c.m} different digits adding to ${sums[k]}. There are not` +
+             ` many ways to do that, and every one of them leaves ${cellName(i)} with the same` +
+             ` ${n} options.` });
+      break;
+    }
+  }
+
   for (const limit of [2, 3, 4, 5]){
     for (let i = 0; i < CELLS; i++){
       if (shown(i) || noted[i]) continue;
       const n = countOf(tight[i]);
       if (n !== limit) continue;
-      return { kind: "note", cell: i, digits: tight[i], cells: [i],
+      offer(COST.shortlist + n, { kind: "note", cell: i, digits: tight[i], cells: [i],
         where: n <= 3 ? `Look at ${cellName(i)} — it has fewer options than it looks.`
                       : `Look at ${cellName(i)} — not everything can go there.`,
         why: `Take out everything its row, column and box already hold, then everything its cage` +
              ` cannot afford alongside its other cells. ${n === N - 1 ? "One digit falls away" :
              `Only ${n} digits survive`}, and pencilling what is left is what lets the sharper` +
-             ` arguments get a grip.` };
+             ` arguments get a grip.` });
+      break;
     }
+    if (offers.length) break;
   }
 
-  return null;
+  offers.sort((a, b) => a.cost - b.cost);
+  return offers[0] ?? null;
 }
 
 /**

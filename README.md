@@ -105,12 +105,18 @@ Not every hint is a digit:
 - **Pencilling a shortlist in** — when a bare cell turns out to have only two or three options — is
   what turns a blank grid into something to reason about.
 
-It tries the easy things first, so you get the simplest step available rather than the cleverest: a
-cage down to its last cell, a cell only one digit fits, a mark the grid has already ruled out, a
-digit with one home left in a row, column or box, a mark the cage's total rules out, a cell that
-total pins down, a digit the cage cannot do without, then **a digit the cage must hold whose every
-possible home one outside cell can see** — locked candidates, without the usual requirement that
-the homes line up on a row.
+**Every technique offers what it finds with a price on it, and the cheapest offer wins.** The order
+the techniques happen to be written in is not a hierarchy, and while first-match-wins was picking
+the answer it was quietly preferring a two-step candidate argument over a two-cell cage adding to 4.
+`COST` states the ranking in one place, so "simplest available" is a claim the code can be checked
+against rather than an accident. The numbers rise with how many separate facts you must hold at
+once, plus a little for how much of the board you have to take in.
+
+The cheap end is a cage down to its last cell, a small cage's total naming the only ways to make it,
+a cell only one digit fits, and a mark the grid has already ruled out. Then a digit with one home
+left in a row, column or box, region arithmetic, and the cage-combination arguments. Then **a digit
+the cage must hold whose every possible home one outside cell can see** — locked candidates, without
+the usual requirement that the homes line up on a row.
 
 Then **region arithmetic**. Any one, two or three whole rows, columns or boxes hold 21 each.
 Subtract the cages lying wholly inside and what remains is a set of cells whose total is known; add
@@ -148,6 +154,10 @@ Driving 30 puzzles that way, hints only:
 Over **300 blank grids**, hints only: **263 finish (88%)**, 37 give up, **0 finish on a wrong
 grid**, and all 37 stuck boards still have exactly one solution — so nothing a hint placed was ever
 wrong. From four correct digits in it is 30 of 30. A hint costs a fraction of a millisecond.
+
+Over 40 blank grids hinted to a stop, the mix bears the ranking out: cage shortlists 23%, naked
+singles 18%, cages down to their last cell 15%, stale marks 10%, hidden singles 9% — and the
+two-step arguments that used to dominate now account for under 1%.
 
 The 37 stall at the opening — 32.5 of 36 cells still empty, 72% of those already pencilled. A quad
 would help exactly one of them. All 37 have a one-cell contradiction available; whether some of
