@@ -1178,12 +1178,126 @@ function hunt(cand, pool, noted){
 }
 
 /**
+ * The last resort: pick something to try, and try the one that fails soonest.
+ *
+ * Everything above states a reason. When none of them can, the honest move is the one a person
+ * makes — take a cell with barely any options left, suppose one of them, and follow it until it
+ * breaks. That is still a proof rather than a peek: nothing here reads the answer, and a digit
+ * that leads to a cell with nothing in it or a cage that cannot add up is genuinely impossible.
+ *
+ * Shallowest failure first, and among equals the cell with fewest options, because "put a 2 here
+ * and it falls over at once" is worth following and "put a 2 here and eleven moves later" is not.
+ * Only runs when the cascade came back empty, so it costs nothing on an ordinary board.
+ */
+function refute(start, digit, noted, cap){
+  const v = new Array(CELLS);
+  for (let i = 0; i < CELLS; i++) v[i] = shown(i);
+  v[start] = digit;
+
+  const cageFit = (k, c) => {
+    const cells = cageMembers[k].filter(i => !v[i]);
+    if (!cells.length) return null;
+    let used = 0, acc = 0;
+    for (const i of cageMembers[k]) if (v[i]){ used |= BIT(v[i]); acc += v[i]; }
+    const need = sums[k] - acc, per = new Array(cells.length).fill(0);
+    let any = false;
+    const digits = [];
+    for (let d = 1; d <= N; d++) if (!(used & BIT(d))) digits.push(d);
+    const walk = (t, avail, sum, taken) => {
+      if (t === cells.length){ if (sum !== need) return; any = true;
+        taken.forEach((d, z) => { per[z] |= BIT(d); }); return; }
+      for (let j = 0; j < avail.length; j++){
+        const d = avail[j];
+        if (!(c[cells[t]] & BIT(d)) || sum + d > need) continue;
+        taken.push(d); walk(t + 1, avail.slice(0, j).concat(avail.slice(j + 1)), sum + d, taken); taken.pop();
+      }
+    };
+    walk(0, digits, 0, []);
+    return { cells, per, any };
+  };
+
+  for (let round = 0; round <= cap; round++){
+    const c = new Array(CELLS).fill(0);
+    for (let i = 0; i < CELLS; i++){
+      if (v[i]) continue;
+      let used = 0;
+      for (const j of ROWS[i / N | 0]) if (v[j]) used |= BIT(v[j]);
+      for (const j of COLS[i % N]) if (v[j]) used |= BIT(v[j]);
+      for (const j of BOXES[boxOf(i)]) if (v[j]) used |= BIT(v[j]);
+      for (const j of cageMembers[cage[i]]) if (v[j]) used |= BIT(v[j]);
+      let m = 0;
+      for (let d = 1; d <= N; d++) if (!(used & BIT(d))) m |= BIT(d);
+      if (noted[i]) m &= noted[i];
+      if (!m) return round;
+      c[i] = m;
+    }
+    for (let k = 0; k < sums.length; k++){
+      const r = cageFit(k, c);
+      if (!r) continue;
+      if (!r.any) return round;
+      for (let t = 0; t < r.cells.length; t++){
+        c[r.cells[t]] &= r.per[t];
+        if (!c[r.cells[t]]) return round;
+      }
+    }
+    let moved = false;
+    for (let i = 0; i < CELLS; i++){
+      if (v[i]) continue;
+      const d = oneBit(c[i]);
+      if (d){ v[i] = d; moved = true; }
+    }
+    if (!moved) for (const h of REGIONS) for (let d = 1; d <= N; d++){
+      if (h.cells.some(i => v[i] === d)) continue;
+      const spots = h.cells.filter(i => !v[i] && (c[i] & BIT(d)));
+      if (!spots.length) return round;
+      if (spots.length === 1){ v[spots[0]] = d; moved = true; }
+    }
+    if (!moved) return null;                    // settles without breaking: nothing proved
+  }
+  return null;
+}
+
+function tryOne(pool, noted){
+  const order = [...Array(CELLS).keys()]
+    .filter(i => !shown(i) && countOf(pool[i]) >= 2 && countOf(pool[i]) <= 3)
+    .sort((a, b) => countOf(pool[a]) - countOf(pool[b]));
+  let best = null, budget = 40;
+  for (const i of order){
+    const opts = [];
+    for (let d = 1; d <= N; d++) if (pool[i] & BIT(d)) opts.push(d);
+    const dead = [];
+    for (const d of opts){
+      if (budget-- <= 0) break;
+      const rounds = refute(i, d, noted, 5);
+      if (rounds === null) continue;
+      dead.push(d);
+      if (!best || rounds < best.rounds || (rounds === best.rounds && opts.length < best.opts))
+        best = { cell: i, digit: d, rounds, opts: opts.length };
+    }
+    // Every option gone is not a hint, it is a report: something already down is wrong.
+    if (dead.length && dead.length === opts.length) return { allDead: i };
+    if (best && best.rounds === 0) break;
+  }
+  return best;
+}
+
+/**
  * Nothing followed — so say which kind of nothing, rather than reaching for the answer.
  *
  * The interesting case is the last one. If the board is stuck while the pencil marks are taken at
  * their word, but *not* stuck when they are ignored, then a mark is the thing in the way. That is
  * worth saying: the hints trusted the player, and the trust is what ran out.
  */
+/** As `strike` inside the cascade, but usable from the fallback, which has no `tight` to hand. */
+function strikeOut(victim, d, pool, noted, where, why){
+  const cells = [victim];
+  if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
+  const ALL = (1 << (N + 1)) - 2;
+  if (!noted[victim] && pool[victim] === ALL)
+    return { kind: "note", cell: victim, digits: ALL & ~BIT(d), cells, where, why };
+  return null;
+}
+
 function findHint(){
   const cand = candidates();
   const { pool, noted } = pools(cand);
@@ -1206,6 +1320,28 @@ function findHint(){
       where: `The cage totalling ${sums[deadCage]} cannot be filled.`,
       why: `There is no way to make its total out of different digits that its cells can still` +
            ` take. Something in it, or pencilled in it, is wrong.` };
+
+  const guess = tryOne(pool, noted);
+  if (guess && guess.allDead !== undefined)
+    return { blocked: true, cells: [guess.allDead],
+      where: `Every option left for ${cellName(guess.allDead)} falls apart.`,
+      why: `Suppose each of them in turn and every one runs into a cell with nothing left or a cage` +
+           ` that cannot reach its total. So something already on the board — a digit, or one of` +
+           ` your pencil marks — is wrong. Check progress can tell you about the digits.` };
+  if (guess){
+    const g = guess;
+    const hit = strikeOut(g.cell, g.digit, pool, noted,
+      `Think about what happens if ${cellName(g.cell)} were ${g.digit}.`,
+      g.rounds === 0
+        ? `Nothing on this board follows on its own any more, so this is the point where you try one` +
+          ` and watch it. Put the ${g.digit} in and it breaks straight away — a cell with nothing` +
+          ` left, or a cage that can no longer reach its total.`
+        : `Nothing on this board follows on its own any more, so this is the point where you try one` +
+          ` and watch it. Put the ${g.digit} in, follow the ${g.rounds === 1 ? "move that is" :
+          `${g.rounds} moves that are`} then forced, and the board breaks — a cell with nothing` +
+          ` left, or a cage that cannot reach its total.`);
+    if (hit) return hit;
+  }
 
   const marked = [...Array(CELLS).keys()].filter(i => noted[i]);
   if (marked.length){
@@ -1992,7 +2128,14 @@ function hintHelpHTML(){
        it is a hint. Pencil a few cells and the rest of the ladder gets a grip.</p>
     <p>Past that it stops. What is left needs assuming something and seeing it fail, which is the
        puzzle rather than a gap in the hints.</p>
-    <h4>When it has nothing</h4>
+    <h4>When nothing follows</h4>
+    <p>Then it stops explaining and starts suggesting. It picks a cell with barely any options left
+       and says <b>think about what happens if this were a 4</b> — choosing whichever guess falls
+       over soonest, so you are following one or two forced moves to a wall rather than wandering.
+       That is still a proof: a digit that leads to a cell with nothing in it, or a cage that cannot
+       reach its total, is genuinely impossible. It is just the one argument you have to walk into
+       rather than see.</p>
+    <h4>When it has nothing at all</h4>
     <p>It says so, and says which kind of nothing. Either something already entered is wrong — an
        empty cell nothing fits, or a cage that can no longer reach its total — in which case
        <b>Check progress</b> is the tool, or the next step genuinely needs holding two

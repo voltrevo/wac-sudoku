@@ -141,10 +141,18 @@ options *are* the hint here rather than an unstated premise underneath one.
 Cage reasoning enumerates whole assignments against each cell's candidates rather than bare subsets
 that add up, which is the difference between running out after two hints and finishing the puzzle.
 
-When nothing fires it says which kind of nothing: a cell with nothing left, a cage that cannot be
-filled, or — the interesting one — *nothing follows while your pencil marks stand*, which it can say
-because it re-runs the search ignoring them and sees a step appear. **It will never quietly read the
-answer to you because it ran out of ideas.**
+When nothing follows, it stops explaining and starts suggesting: it picks a cell with barely any
+options left and says **think about what happens if this were a 4**, choosing whichever guess falls
+over soonest so you follow one or two forced moves to a wall rather than wandering. That is still a
+proof — a digit leading to a cell with nothing in it, or a cage that cannot reach its total, is
+impossible — it is just the one argument you have to walk into rather than see. It runs only when
+the whole cascade came back empty, so it costs nothing on an ordinary board and about 3 ms when it
+is needed.
+
+Past even that it says which kind of nothing: every option for one cell falling apart, a cage that
+cannot be filled, or *nothing follows while your pencil marks stand*, which it can say because it
+re-runs the search ignoring them and sees a step appear. **It will never quietly read the answer to
+you because it ran out of ideas.**
 
 The invariant is soundness relative to truthful input: given correct entries and marks that always
 contain the true digit, no hint may contradict the answer, and none may rub out a true digit.
@@ -153,19 +161,16 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-Over **300 blank grids**, hints only: **277 finish (92%)**, 23 give up, **0 finish on a wrong
-grid**, and all 23 stuck boards still have exactly one solution — so nothing a hint placed was ever
+Over **300 blank grids**, hints only: **297 finish (99%)**, 3 give up, **0 finish on a wrong
+grid**, and all 3 stuck boards still have exactly one solution — so nothing a hint placed was ever
 wrong. From four correct digits in it is 30 of 30. A hint costs a fraction of a millisecond.
 
 Over 40 blank grids hinted to a stop, the mix bears the ranking out: cage shortlists 23%, naked
 singles 18%, cages down to their last cell 15%, stale marks 10%, hidden singles 9% — and the
 two-step arguments that used to dominate now account for under 1%.
 
-The 23 stall at the opening, and not for want of pencilling: every cell they can say anything about
-is marked exactly as tightly as the grid and cages allow, and every unmarked cell still has all six
-digits open. Pointing, claiming, house-to-cage and the region arithmetic are all exhausted on them;
-a quad helps one, an X-wing one. What the other 21 need has not been identified, and calling it case
-analysis has already been wrong twice.
+The 3 that remain stop after one or two digits, with everything above exhausted and no guess that
+falls over inside the search's depth limit.
 
 A blank grid is the worst case by design, since nothing is pencilled and the eliminations have
 nowhere to land. Letting them run on cells the player had *not* marked would reach 75%, but that
