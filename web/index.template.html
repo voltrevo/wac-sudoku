@@ -40,13 +40,14 @@ h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
 #menu{width:36px;height:32px;border:1px solid var(--keyb);border-radius:9px;background:var(--panel);
   color:var(--ink);font-size:15px;line-height:1;cursor:pointer;padding:0}
 #menu[aria-expanded="true"]{background:var(--acc);border-color:var(--acc);color:#fff}
-.menu{position:absolute;top:38px;right:0;z-index:20;min-width:168px;padding:5px;
+.menu{position:absolute;top:38px;right:0;z-index:20;min-width:206px;padding:5px;
   background:var(--panel);border:1px solid var(--keyb);border-radius:12px;
   box-shadow:0 10px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:2px}
 .menu[hidden]{display:none}
-.menu button{padding:11px 12px;border:0;border-radius:9px;background:none;color:var(--ink);
-  font:inherit;font-size:15px;font-weight:600;text-align:left;cursor:pointer}
-.menu button:active,.menu button:hover{background:var(--peer)}
+.menu button,.menu a{display:block;padding:11px 12px;border:0;border-radius:9px;background:none;
+  color:var(--ink);font:inherit;font-size:15px;font-weight:600;text-align:left;cursor:pointer;
+  text-decoration:none;white-space:nowrap}
+.menu button:active,.menu button:hover,.menu a:active,.menu a:hover{background:var(--peer)}
 
 /* ---- history ---- */
 .sheet{position:fixed;inset:0;z-index:30;background:var(--bg);display:flex;flex-direction:column;
@@ -168,6 +169,8 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
       <button id="menu" type="button" aria-label="Menu" aria-expanded="false" aria-haspopup="true">☰</button>
       <nav class="menu" id="menupanel" hidden>
         <button id="mhistory" type="button">🕘&nbsp; History</button>
+        <a id="missue" href="https://github.com/voltrevo/wac-sudoku/issues/new"
+           target="_blank" rel="noopener noreferrer">🐞&nbsp; Report an issue</a>
       </nav>
     </div>
   </header>
@@ -851,6 +854,7 @@ $("undo").addEventListener("click", undo);
 $("clear").addEventListener("click", clearAll);
 $("menu").addEventListener("click", e => { e.stopPropagation(); openMenu($("menupanel").hidden); });
 $("mhistory").addEventListener("click", () => { openMenu(false); openSheet(); });
+$("missue").addEventListener("click", () => openMenu(false));
 $("hclose").addEventListener("click", closeSheet);
 document.addEventListener("click", e => { if (!$("menupanel").hidden && !e.target.closest(".hgroup")) openMenu(false); });
 $("reveal").addEventListener("click", () => {
