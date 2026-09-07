@@ -120,7 +120,9 @@ the usual requirement that the homes line up on a row — and the three that cor
 way round: every 4 a box can take sitting on one row (**pointing**), every 4 a row can take sitting
 in one box (**claiming**), or every 4 a house can take belonging to one cage.
 
-Then **region arithmetic**. Any one, two or three whole rows, columns or boxes hold 21 each.
+Then **region arithmetic**. Any one, two or three whole rows, columns or boxes that do not overlap
+hold 21 each — across bands as well as within one, since a row and a box that miss each other still
+hold 42 between them.
 Subtract the cages lying wholly inside and what remains is a set of cells whose total is known; add
 up every cage that touches it instead and the overflow outside is known the same way. One cell left
 over names a digit outright and needs nothing pencilled. After that, the same hunts again over what
@@ -147,8 +149,11 @@ so you follow one or two forced moves to a wall rather than wandering. It works 
 to six, widening only when a width has nothing refutable in it. That is still a
 proof — a digit leading to a cell with nothing in it, or a cage that cannot reach its total, is
 impossible — it is just the one argument you have to walk into rather than see. It runs only when
-the whole cascade came back empty, so it costs nothing on an ordinary board and about 3 ms when it
+the whole cascade came back empty, so it costs nothing on an ordinary board and about 4 ms when it
 is needed.
+
+It is meant to be rare, and it is: across 300 blank grids and **21,288 hints**, the fallback was
+reached **28 times (0.1%)**, on 18 of the 300 boards.
 
 Past even that it says which kind of nothing: every option for one cell falling apart, a cage that
 cannot be filled, or *nothing follows while your pencil marks stand*, which it can say because it

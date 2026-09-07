@@ -548,26 +548,44 @@ const REGION_TOTAL = (N * (N + 1)) / 2;      // 21: every row, column and box ho
 const listNames = xs => xs.length < 2 ? xs[0] : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 
 /**
- * Every set of cells whose total is known from the 21 rule alone: one, two or three whole rows,
- * columns or boxes.
+ * Every set of cells whose total is known from the 21 rule alone: any one, two or three whole rows,
+ * columns or boxes that do not overlap.
  *
- * Static, so it is built once. Three is enough — four rows are the complement of two, and say the
- * same thing about the same cages.
+ * Static, so it is built once. **Across bands as well as within one** — a row and a box that miss
+ * each other still hold 42 between them, and restricting this to rows-with-rows was leaving that
+ * on the table. A row and a column always cross, so those never pair. Three is enough within a
+ * band, since four rows are the complement of two and say the same thing about the same cages.
+ *
+ * Sets that come out the same are dropped: two boxes side by side are a pair of rows by another
+ * name, and there is no sense asking the same question twice.
  */
 const UNIONS = (() => {
-  const out = [];
-  for (const [label, band, names] of [["row", ROWS, null], ["column", COLS, null], ["box", BOXES, BOX_NAMES]]){
-    const rec = (start, pick) => {
-      if (pick.length) out.push({
-        cells: pick.flatMap(i => band[i]), total: REGION_TOTAL * pick.length, k: pick.length,
-        name: pick.length === 1 ? (names ? names[pick[0]] : `${label} ${pick[0] + 1}`)
-            : names ? `the ${pick.length} highlighted boxes`
-            : `${label}s ${listNames(pick.map(x => x + 1))}`,
-      });
-      if (pick.length === 3) return;
-      for (let i = start; i < N; i++){ pick.push(i); rec(i + 1, pick); pick.pop(); }
-    };
-    rec(0, []);
+  const named = [
+    ...ROWS.map((cells, i) => ({ cells, name: `row ${i + 1}` })),
+    ...COLS.map((cells, i) => ({ cells, name: `column ${i + 1}` })),
+    ...BOXES.map((cells, i) => ({ cells, name: BOX_NAMES[i] })),
+  ].map(r => ({ ...r, set: new Set(r.cells) }));
+
+  const out = [], seen = new Set();
+  const add = pick => {
+    const cells = pick.flatMap(t => named[t].cells).sort((a, b) => a - b);
+    const key = cells.join(",");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ cells, total: REGION_TOTAL * pick.length, k: pick.length,
+               name: listNames(pick.map(t => named[t].name)) });
+  };
+  const free = (pick, t) => pick.every(u => !named[u].cells.some(i => named[t].set.has(i)));
+  for (let a = 0; a < named.length; a++){
+    add([a]);
+    for (let b = a + 1; b < named.length; b++){
+      if (!free([a], b)) continue;
+      add([a, b]);
+      for (let c = b + 1; c < named.length; c++){
+        if (!free([a, b], c)) continue;
+        add([a, b, c]);
+      }
+    }
   }
   return out.sort((a, b) => a.k - b.k);
 })();
@@ -1107,7 +1125,9 @@ function hunt(cand, pool, noted){
   for (const f of facts){
     const open = factOpen(f);
     if (open.length < 2 || open.length > 4) continue;
-    if (open.some(i => !noted[i])) continue;
+    /* Marked, or bare with all six still open — reading "any digit" off an untouched cell asserts
+     * nothing, where reading four off one narrows it in a way the player has not written down. */
+    if (open.some(i => !noted[i] && tight[i] !== ALL)) continue;
     const need = factNeed(f);
     if (need < 1 || need > open.length * N) continue;
     const per = new Array(open.length).fill(0);
