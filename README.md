@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 94 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 99 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -90,21 +90,42 @@ taps, stop wherever you like:
 2. **Why** — names the reasoning and leaves the arithmetic to you.
 3. **Just tell me** — writes the digit in. One Undo takes it back out.
 
+**It reads your pencil marks, and takes them as assertions.** Writing 2 4 5 in a cell says it is one
+of those, so every technique reasons from your marks as well as from the digits — which makes hints
+sharper the further in you are.
+
+It follows that **a hint can be wrong if a mark is wrong, and that is the design**. Hints reason from
+the board, not from the answer. If a mark is mistaken you get walked into a contradiction — a cell
+nothing fits, a cage that cannot add up — and finding that out beats being told nothing.
+
+Not every hint is a digit:
+
+- **Rubbing a mark out** is progress, and often the most valuable kind, because a stale mark
+  misleads everything after it, hints included.
+- **Pencilling a shortlist in** — when a bare cell turns out to have only two or three options — is
+  what turns a blank grid into something to reason about.
+
 It tries the easy things first, so you get the simplest step available rather than the cleverest: a
-cage down to its last cell, a cell only one digit fits, a digit with one home left in a row, column
-or box, then what a cage's total allows across its remaining cells — enumerating whole assignments
-against each cell's candidates, not just which digits add up — then a digit the cage cannot do
-without, then **region arithmetic**: every row, column and box adds to 21, so a cage lying wholly
-inside one or poking a single cell out of one gives that cell away. Last come the same hunts again
-over what the cages have narrowed the cells to, which is two steps of reasoning rather than one.
+cage down to its last cell, a cell only one digit fits, a mark the grid has already ruled out, a
+digit with one home left in a row, column or box, a mark the cage's total rules out, a cell that
+total pins down, a digit the cage cannot do without, a digit its cage locks onto one line, then
+**region arithmetic** — every row, column and box adds to 21, so a cage lying wholly inside one or
+poking a single cell out of one gives that cell away — then the same hunts again over what the cages
+have narrowed things to, and last a shortlist for a cell that has none.
 
-When nothing fires it says so, and says which kind of nothing — either something already entered is
-wrong, in which case Check progress is the tool, or the next step genuinely needs holding two
-possibilities at once. **It will never quietly read the answer to you because it ran out of ideas.**
+Cage reasoning enumerates whole assignments against each cell's candidates rather than bare subsets
+that add up, which is the difference between running out after two hints and finishing the puzzle.
 
-Measured by driving the real UI to completion and checking every digit against the answer: **664
-hints, none wrong**. From an empty grid it solves 4 puzzles in 10 unaided and honestly gives up on
-the rest; from eight correct digits in, 10 out of 10. A hint costs about 1.3 ms.
+When nothing fires it says which kind of nothing: a cell with nothing left, a cage that cannot be
+filled, or — the interesting one — *nothing follows while your pencil marks stand*, which it can say
+because it re-runs the search ignoring them and sees a step appear. **It will never quietly read the
+answer to you because it ran out of ideas.**
+
+The invariant is soundness relative to truthful input: given correct entries and marks that always
+contain the true digit, no hint may contradict the answer, and none may rub out a true digit.
+Measured by driving the real UI to a finished grid: **726 hints across two regimes, none unsound**,
+12 of 12 puzzles carried to a finish either way. Over 20 blank grids hinted to a stop, the mix was
+597 placements, 51 shortlists, 24 mark-eliminations and 5 honest stops. A hint costs about 1.3 ms.
 
 ### Checking your progress
 

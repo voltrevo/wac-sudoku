@@ -553,17 +553,42 @@ function candidates(){
 }
 
 /**
+ * What each empty cell could still hold.
+ *
+ * `cand` is what the placed digits leave. `pool` is that narrowed by the player's pencil marks,
+ * because **a mark is an assertion**: writing 2 4 5 in a cell says it is one of those, and a hint
+ * that ignored it would be answering a question nobody asked.
+ *
+ * If the marks are wrong the hints will be wrong, and that is the design. A hint reasons from what
+ * is on the board, not from the answer — being walked into a contradiction is how you find out a
+ * mark was wrong, and it is a good deal more useful than silence.
+ */
+function pools(cand){
+  const pool = cand.slice(), noted = new Array(CELLS).fill(0);
+  for (let i = 0; i < CELLS; i++){
+    if (shown(i) || !notes[i].size) continue;
+    let m = 0;
+    for (const d of notes[i]) m |= BIT(d);
+    noted[i] = m;
+    pool[i] = cand[i] & m;
+  }
+  return { pool, noted };
+}
+
+const listOf = m => { const ds = []; for (let d = 1; d <= N; d++) if (m & BIT(d)) ds.push(d);
+  return ds.length < 2 ? String(ds[0]) : `${ds.slice(0, -1).join(", ")} and ${ds[ds.length - 1]}`; };
+const countOf = m => { let n = 0; for (let d = 1; d <= N; d++) if (m & BIT(d)) n++; return n; };
+
+/**
  * Every way a cage's empty cells could be filled, and what that leaves each of them.
  *
- * Not just "which digits add up" — the digits also have to *fit*, so this enumerates whole
- * assignments against each cell's candidates rather than bare subsets. With at most five empty
- * cells that is a few hundred branches, and it is what makes the cage reasoning strong enough to
- * be worth asking for.
+ * Not just "which digits add up" — the digits also have to fit what each cell can still take, so
+ * this enumerates whole assignments rather than bare subsets. At most five empty cells is a few
+ * hundred branches, and it is what makes the cage reasoning worth asking for.
  *
- * `per[t]` is what cell `t` can be across all of them, `must` the digits that turn up in every
- * one — the only thing that licenses hunting for a digit's last home inside a cage.
+ * `per[t]` is what cell `t` can be across all of them, `must` the digits in every one.
  */
-function cagePlacements(k, cand){
+function cagePlacements(k, pool){
   const cells = cageMembers[k].filter(i => !shown(i));
   const m = cells.length;
   if (!m) return null;
@@ -587,98 +612,167 @@ function cagePlacements(k, cand){
     }
     for (let j = 0; j < avail.length; j++){
       const d = avail[j];
-      if (!(cand[cells[t]] & BIT(d)) || sum + d > need) continue;
+      if (!(pool[cells[t]] & BIT(d)) || sum + d > need) continue;
       taken.push(d);
       walk(t + 1, avail.slice(0, j).concat(avail.slice(j + 1)), sum + d, taken);
       taken.pop();
     }
   };
   walk(0, digits, 0, []);
-  return { cells, per, must: any ? must : 0, need, m, any };
+  return { cells, per, must: any ? must : 0, need, m, any, used, acc };
 }
 
-function findHint(){
-  const cand = candidates();
-  const cages = sums.map((_, k) => cagePlacements(k, cand));
+/** Which house already holds `d`, for saying *why* a pencil mark cannot stand. */
+function blamedBy(i, d){
+  const r = i / N | 0, c = i % N;
+  if (ROWS[r].some(j => shown(j) === d)) return `there is already a ${d} in row ${r + 1}`;
+  if (COLS[c].some(j => shown(j) === d)) return `there is already a ${d} in column ${c + 1}`;
+  if (BOXES[boxOf(i)].some(j => shown(j) === d)) return `there is already a ${d} in its box`;
+  if (cageMembers[cage[i]].some(j => shown(j) === d)) return `its cage already has a ${d}`;
+  return null;
+}
 
-  // 1. A cage down to its last cell: the total names it.
+/** The cascade itself, over whatever the caller is willing to believe. Returns null if nothing
+ *  in it applies — `findHint` decides what that silence means. */
+function hunt(cand, pool, noted){
+  const cages = sums.map((_, k) => cagePlacements(k, pool));
+  const place = (cell, digit, cells, where, why) => ({ kind: "place", cell, digit, cells, where, why });
+  const unnote = (cell, digit, cells, where, why) => ({ kind: "unnote", cell, digit, cells, where, why });
+
+  // 1. A cage down to its last cell: the total names it. Said even when the digit collides with
+  //    something — the collision is the news.
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || c.m !== 1) continue;
-    const d = oneBit(c.per[0]);
-    if (!d) continue;
-    return { cell: c.cells[0], digit: d, cells: cageMembers[k],
-      where: `The cage totalling ${sums[k]} has one cell left.`,
-      why: `You know what it adds to and you know every other digit in it, so the last one is` +
-           ` whatever is missing.` };
+    const d = sums[k] - c.acc;
+    if (d < 1 || d > N)
+      return { blocked: true, cells: cageMembers[k],
+        where: `The cage totalling ${sums[k]} cannot be finished.`,
+        why: `It has one cell left and needs ${d} in it, which is not a digit. Something already` +
+             ` in this cage is wrong.` };
+    return place(c.cells[0], d, cageMembers[k],
+      `The cage totalling ${sums[k]} has one cell left.`,
+      `You know what it adds to and you know every other digit in it, so the last one is whatever` +
+      ` is missing.`);
   }
 
-  // 2. A cell only one digit fits: everything else is already spoken for around it.
+  // 2. One digit left for a cell — counting the player's own marks as the assertion they are.
   for (let i = 0; i < CELLS; i++){
     if (shown(i)) continue;
-    const d = oneBit(cand[i]);
+    const d = oneBit(pool[i]);
     if (!d) continue;
-    return { cell: i, digit: d, cells: [i],
-      where: `Look at ${cellName(i)}.`,
-      why: `Between its row, its column, its box and its cage, every digit but one is already` +
-           ` taken. Work through 1 to 6 and only one survives.` };
+    return place(i, d, [i], `Look at ${cellName(i)}.`,
+      noted[i] && countOf(cand[i]) > 1
+        ? `You have pencilled it down to a short list, and everything on that list except one digit`
+          + ` is now taken by its row, column, box or cage.`
+        : `Between its row, its column, its box and its cage, every digit but one is already taken.`
+          + ` Work through 1 to 6 and only one survives.`);
   }
 
-  // 3. A digit with only one home left in a row, column or box.
-  //
+  // 3. A pencil mark that cannot stand any more. Rubbing one out is progress, and a stale mark is
+  //    worse than no mark: everything below trusts them.
+  for (let i = 0; i < CELLS; i++){
+    if (shown(i) || !noted[i]) continue;
+    for (let d = 1; d <= N; d++){
+      if (!(noted[i] & BIT(d)) || (cand[i] & BIT(d))) continue;
+      const blame = blamedBy(i, d);
+      if (!blame) continue;
+      return unnote(i, d, [i], `Look at your pencil marks in ${cellName(i)}.`,
+        `One of them cannot be right any more — ${blame}.`);
+    }
+  }
+
+  // 4. A digit with only one home left in a row, column or box.
   //    Rows, columns and boxes only. A cage is **not** a house: it holds as many digits as it has
-  //    cells, so a digit being absent from one says nothing about whether it belongs there. The
-  //    cage version needs a reason to believe the digit is in the cage at all — that is 5.
-  const hiddenIn = (pool, label) => {
+  //    cells, so a digit being absent from one says nothing about whether it belongs there.
+  const hiddenIn = (from, why) => {
     for (const h of REGIONS){
       for (let d = 1; d <= N; d++){
         if (h.cells.some(i => shown(i) === d)) continue;
-        const spots = h.cells.filter(i => !shown(i) && (pool[i] & BIT(d)));
-        if (spots.length !== 1) continue;
-        return { cell: spots[0], digit: d, cells: h.cells, where: `Look at ${h.name}.`, why: label };
+        const spots = h.cells.filter(i => !shown(i) && (from[i] & BIT(d)));
+        if (spots.length !== 1 || oneBit(from[spots[0]])) continue;
+        return place(spots[0], d, h.cells, `Look at ${h.name}.`, why);
       }
     }
     return null;
   };
-  const plain = hiddenIn(cand,
+  const plain = hiddenIn(pool,
     `Every row, column and box holds each of 1 to 6 exactly once. One of the digits this one is` +
     ` still missing has a single empty cell left that can take it — try each missing digit in turn` +
     ` and see where it could go.`);
   if (plain) return plain;
 
-  // 4. The cage's arithmetic pins a cell that its neighbours alone did not.
+  // 5. A mark the cage's arithmetic rules out, which the grid alone does not.
+  for (let k = 0; k < sums.length; k++){
+    const c = cages[k];
+    if (!c || !c.any) continue;
+    for (let t = 0; t < c.m; t++){
+      const i = c.cells[t];
+      if (!noted[i]) continue;
+      for (let d = 1; d <= N; d++){
+        if (!(pool[i] & BIT(d)) || (c.per[t] & BIT(d))) continue;
+        return unnote(i, d, cageMembers[k],
+          `Look at ${cellName(i)} against the cage totalling ${sums[k]}.`,
+          `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out the ways` +
+          ` that can happen and throw away any needing a digit a cell cannot take — one of your` +
+          ` marks here appears in none of what is left.`);
+      }
+    }
+  }
+
+  // 6. The cage's arithmetic pins a cell that its neighbours alone did not.
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
     for (let t = 0; t < c.m; t++){
       const i = c.cells[t], d = oneBit(c.per[t]);
-      if (!d || oneBit(cand[i])) continue;
-      return { cell: i, digit: d, cells: cageMembers[k],
-        where: `Look at the cage totalling ${sums[k]}.`,
-        why: `Its ${c.m} empty cells must be ${c.m} different digits adding to ${c.need}. Write out` +
-             ` the ways that can happen, and throw away any that need a digit a cell cannot take.` +
-             ` Every one that is left puts the same digit in ${cellName(i)}.` };
+      if (!d || oneBit(pool[i])) continue;
+      return place(i, d, cageMembers[k], `Look at the cage totalling ${sums[k]}.`,
+        `Its ${c.m} empty cells must be ${c.m} different digits adding to ${c.need}. Write out the` +
+        ` ways that can happen, and throw away any that need a digit a cell cannot take. Every one` +
+        ` that is left puts the same digit in ${cellName(i)}.`);
     }
   }
 
-  // 5. A digit the cage cannot do without, with one place left to put it. Sound where 3 was not,
-  //    because `must` is what appears in *every* way of completing the cage.
+  // 7. A digit the cage cannot do without, with one place left to put it. Sound where hunting
+  //    hidden singles inside a cage is not, because `must` is what every completion contains.
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
     for (let d = 1; d <= N; d++){
       if (!(c.must & BIT(d))) continue;
       const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
-      if (spots.length !== 1 || oneBit(cand[spots[0]])) continue;
-      return { cell: spots[0], digit: d, cells: cageMembers[k],
-        where: `Look at the cage totalling ${sums[k]} — and at what it cannot do without.`,
-        why: `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out every` +
-             ` way that can happen: one digit turns up in all of them, so the cage must hold it —` +
-             ` and only one of its cells can.` };
+      if (spots.length !== 1 || oneBit(pool[spots[0]])) continue;
+      return place(spots[0], d, cageMembers[k],
+        `Look at the cage totalling ${sums[k]} — and at what it cannot do without.`,
+        `Its ${c.m} empty cells must be different digits adding to ${c.need}. Write out every way` +
+        ` that can happen: one digit turns up in all of them, so the cage must hold it — and only` +
+        ` one of its cells can.`);
     }
   }
 
-  // 6. Region arithmetic. Every row, column and box adds to 21, so a cage lying wholly inside one,
+  // 8. Locked into a line. If a cage can only put `d` on one row or column, nothing else on that
+  //    line can be `d` — which rubs out a mark somewhere the cage does not even reach.
+  for (let k = 0; k < sums.length; k++){
+    const c = cages[k];
+    if (!c || !c.any) continue;
+    for (let d = 1; d <= N; d++){
+      const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
+      if (!spots.length) continue;
+      for (const [pick, band, label] of [[i => i / N | 0, ROWS, "row"], [i => i % N, COLS, "column"]]){
+        const line = pick(spots[0]);
+        if (!spots.every(i => pick(i) === line)) continue;
+        const victim = band[line].find(i => !shown(i) && cage[i] !== k && (noted[i] & BIT(d)) && (pool[i] & BIT(d)));
+        if (victim === undefined) continue;
+        return unnote(victim, d, [...cageMembers[k], ...band[line]],
+          `Look at the cage totalling ${sums[k]}, and at ${label} ${line + 1}.`,
+          `Wherever that digit goes in this cage, it lands on this ${label} — so the ${label} has` +
+          ` its copy of it already spoken for, and no cell outside the cage can be it.`);
+      }
+    }
+  }
+
+  // 9. Region arithmetic. Every row, column and box adds to 21, so a cage lying wholly inside one,
   //    or poking a single cell out of one, gives that odd cell away.
   for (const reg of REGIONS){
     const inReg = new Set(reg.cells);
@@ -689,34 +783,34 @@ function findHint(){
     const left = reg.cells.filter(i => !covered.has(i));
     if (inside.length && left.length === 1 && !shown(left[0])){
       const d = REGION_TOTAL - inside.reduce((t, k) => t + sums[k], 0);
-      if (d >= 1 && d <= N && (cand[left[0]] & BIT(d)))
-        return { cell: left[0], digit: d, cells: [...covered, left[0]],
-          where: `Look at ${reg.name}, and at which cages sit entirely inside it.`,
-          why: `Every row, column and box holds 1 to 6, so it adds to ${REGION_TOTAL}. The cages` +
-               ` wholly inside this one cover all of it but a single cell — so that cell is` +
-               ` ${REGION_TOTAL} minus their totals.` };
+      if (d >= 1 && d <= N && !oneBit(pool[left[0]]))
+        return place(left[0], d, [...covered, left[0]],
+          `Look at ${reg.name}, and at which cages sit entirely inside it.`,
+          `Every row, column and box holds 1 to 6, so it adds to ${REGION_TOTAL}. The cages wholly` +
+          ` inside this one cover all of it but a single cell — so that cell is ${REGION_TOTAL}` +
+          ` minus their totals.`);
     }
 
     const union = new Set(touching.flatMap(k => cageMembers[k]));
     const out = [...union].filter(i => !inReg.has(i));
     if (out.length === 1 && !shown(out[0])){
       const d = touching.reduce((t, k) => t + sums[k], 0) - REGION_TOTAL;
-      if (d >= 1 && d <= N && (cand[out[0]] & BIT(d)))
-        return { cell: out[0], digit: d, cells: [...union],
-          where: `Look at ${reg.name} — and at the one cell its cages reach outside it.`,
-          why: `Every row, column and box adds to ${REGION_TOTAL}. Add up every cage that touches` +
-               ` this one: together they cover it exactly, plus that single cell outside. So the` +
-               ` cell outside is their totals minus ${REGION_TOTAL}.` };
+      if (d >= 1 && d <= N && !oneBit(pool[out[0]]))
+        return place(out[0], d, [...union],
+          `Look at ${reg.name} — and at the one cell its cages reach outside it.`,
+          `Every row, column and box adds to ${REGION_TOTAL}. Add up every cage that touches this` +
+          ` one: together they cover it exactly, plus that single cell outside. So the cell outside` +
+          ` is their totals minus ${REGION_TOTAL}.`);
     }
   }
 
-  // 7. The same hunt as 3, but over what the cages have narrowed the cells to rather than over
-  //    what is merely absent. Last because it is two steps of reasoning rather than one.
-  const tight = cand.slice();
+  // 10. The same hunt as 4, over what the cages have narrowed the cells to rather than over what is
+  //     merely absent. Two steps of reasoning, so it comes late.
+  const tight = pool.slice();
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any) continue;
-    c.cells.forEach((i, t) => { tight[i] = cand[i] & c.per[t]; });
+    c.cells.forEach((i, t) => { tight[i] = pool[i] & c.per[t]; });
   }
   const deep = hiddenIn(tight,
     `Work out first what each cage's total allows in each of its cells — that rules out more than` +
@@ -724,27 +818,64 @@ function findHint(){
     ` missing has only a single cell left that can take it.`);
   if (deep) return deep;
 
-  for (let i = 0; i < CELLS; i++){
-    if (shown(i) || oneBit(cand[i])) continue;
-    const d = oneBit(tight[i]);
-    if (!d) continue;
-    return { cell: i, digit: d, cells: [i],
-      where: `Look at ${cellName(i)} — and at the cage it belongs to.`,
-      why: `Take the digits its row, column and box still allow, then keep only those its cage can` +
-           ` actually afford alongside its other cells. One survives.` };
+  // 11. Nothing places or rubs out. Narrowing a bare cell to a short list is still a step, and it
+  //     is the one that turns a blank grid into something to reason about.
+  for (const limit of [2, 3]){
+    for (let i = 0; i < CELLS; i++){
+      if (shown(i) || noted[i]) continue;
+      const n = countOf(tight[i]);
+      if (n !== limit) continue;
+      return { kind: "note", cell: i, digits: tight[i], cells: [i],
+        where: `Look at ${cellName(i)} — it has fewer options than it looks.`,
+        why: `Take out everything its row, column and box already hold, then everything its cage` +
+             ` cannot afford alongside its other cells. Only ${n} digits survive, and pencilling` +
+             ` them in is what makes the next step visible.` };
+    }
   }
 
-  // Nothing followed. Say which kind of nothing, rather than reaching for the answer.
-  const stuckCell = [...Array(CELLS).keys()].find(i => !shown(i) && !cand[i]);
+  return null;
+}
+
+/**
+ * Nothing followed — so say which kind of nothing, rather than reaching for the answer.
+ *
+ * The interesting case is the last one. If the board is stuck while the pencil marks are taken at
+ * their word, but *not* stuck when they are ignored, then a mark is the thing in the way. That is
+ * worth saying: the hints trusted the player, and the trust is what ran out.
+ */
+function findHint(){
+  const cand = candidates();
+  const { pool, noted } = pools(cand);
+  const found = hunt(cand, pool, noted);
+  if (found) return found;
+
+  const cages = sums.map((_, k) => cagePlacements(k, pool));
+  const noRoom = [...Array(CELLS).keys()].find(i => !shown(i) && !pool[i]);
+  if (noRoom !== undefined)
+    return { blocked: true, cells: [noRoom],
+      where: `${cellName(noRoom)} has nothing left it can be.`,
+      why: noted[noRoom]
+        ? `Every digit you have pencilled there is now taken by its row, column, box or cage. Either` +
+          ` a mark was wrong or a digit near it is.`
+        : `No digit fits it at all, so one of the digits around it is wrong. Nothing here can say` +
+          ` which — Check progress can.` };
   const deadCage = cages.findIndex(c => c && !c.any);
-  if (stuckCell !== undefined || deadCage >= 0)
-    return { blocked: true,
-      where: `Something already on the board cannot be right.`,
-      why: stuckCell !== undefined
-        ? `There is an empty cell with no digit left that fits it, so one of the digits around it` +
-          ` is wrong. Nothing here can say which — Check progress can.`
-        : `A cage can no longer reach its total with different digits, so one of the digits in it` +
-          ` is wrong. Nothing here can say which — Check progress can.` };
+  if (deadCage >= 0)
+    return { blocked: true, cells: cageMembers[deadCage],
+      where: `The cage totalling ${sums[deadCage]} cannot be filled.`,
+      why: `There is no way to make its total out of different digits that its cells can still` +
+           ` take. Something in it, or pencilled in it, is wrong.` };
+
+  const marked = [...Array(CELLS).keys()].filter(i => noted[i]);
+  if (marked.length){
+    const ignoring = hunt(cand, cand, new Array(CELLS).fill(0));
+    if (ignoring && !ignoring.blocked)
+      return { blocked: true, cells: marked,
+        where: `Nothing follows while your pencil marks stand.`,
+        why: `Taking them at their word, no step is available anywhere on the board. Ignore them` +
+             ` and there is one — so one of them is almost certainly wrong. They are working, not` +
+             ` answers: rub out the ones you are least sure of and ask again.` };
+  }
   return { blocked: true,
     where: `Nothing here follows in one step.`,
     why: `Every technique this knows — forced cells, a digit with one home left, what a cage's` +
@@ -808,7 +939,12 @@ function paintHint(){
     $("hinttext").textContent = hint.why;
     more.hidden = false; more.textContent = "Just tell me";
   } else {
-    $("hinttext").textContent = `${cellName(hint.cell)} is ${hint.digit}.`;
+    $("hinttext").textContent =
+        hint.kind === "unnote" ? `${cellName(hint.cell)} cannot be ${hint.digit}.`
+      : hint.kind === "note"   ? (countOf(hint.digits) === 2
+            ? `${cellName(hint.cell)} is either ${listOf(hint.digits).replace(" and ", " or ")}.`
+            : `${cellName(hint.cell)} is one of ${listOf(hint.digits)}.`)
+      :                          `${cellName(hint.cell)} is ${hint.digit}.`;
     more.hidden = false; more.textContent = "Another hint";
   }
   $("hintdone").textContent = hintStage >= 3 ? "Done" : "Dismiss";
@@ -826,9 +962,13 @@ function escalate(){
   if (hintStage >= 3) return askHint();
   hintStage++;
   if (hintStage === 3 && !hint.blocked){
-    // Entered as your own digit, in one batch, so a single undo takes it back out again.
+    // Done to the board as your own edit, in one batch, so a single undo takes it back out.
     begin(); touch(hint.cell);
-    val[hint.cell] = hint.digit; notes[hint.cell].clear();
+    if (hint.kind === "unnote") notes[hint.cell].delete(hint.digit);
+    else if (hint.kind === "note"){
+      notes[hint.cell] = new Set();
+      for (let d = 1; d <= N; d++) if (hint.digits & BIT(d)) notes[hint.cell].add(d);
+    } else { val[hint.cell] = hint.digit; notes[hint.cell].clear(); }
     commit();
     sel = hint.cell;
   }
@@ -860,7 +1000,7 @@ function draw(){
      * marked. Checked over 12000 part-filled grids: no conflict was made only of correct digits. */
     el.classList.toggle("bad",  !check && bad.has(i));
     el.classList.toggle("derived", !val[i] && !!auto[i]);
-    el.classList.toggle("hintr", !!hint && !hint.blocked && hint.cells.includes(i));
+    el.classList.toggle("hintr", !!hint && !!hint.cells && hint.cells.includes(i));
     el.classList.toggle("hintc", !!hint && hint.cell === i);
     el.classList.toggle("ok",   !!check && check[i] === 1);
     el.classList.toggle("nope", !!check && check[i] === -1);
@@ -1431,15 +1571,33 @@ function hintHelpHTML(){
           enough, and it costs you almost nothing.</li>
       <li><b>Why.</b> It names the reasoning — which rule or which sum does the work — and leaves
           the arithmetic to you.</li>
-      <li><b>Just tell me.</b> It writes the digit in. One Undo takes it back out.</li>
+      <li><b>Just tell me.</b> It does the thing — writes the digit in, rubs the mark out, or
+          pencils the shortlist. One Undo takes it back out.</li>
     </ul>
     <p>Stop at any point. Dismissing costs nothing and nothing is counted.</p>
+    <h4>It reads your pencil marks</h4>
+    <p><b>A mark is an assertion.</b> Writing 2 4 5 in a cell says it is one of those, and hints
+       take you at your word — everything below reasons from your marks as well as from the digits.
+       That makes the hints much sharper as you go, which is the point.</p>
+    <p>It also means <b>a hint can be wrong if a mark is wrong</b>, and that is deliberate rather
+       than a gap. It reasons from the board, not from the answer. If a mark is mistaken you will be
+       walked into a contradiction — a cell nothing fits, a cage that cannot add up — and finding
+       that out is a good deal more useful than being told nothing. If two hints seem to fight, one
+       of your marks is the reason.</p>
+    <h4>Not every hint is a digit</h4>
+    <ul>
+      <li><b>Rubbing a mark out</b> is progress, and often the most valuable kind: a stale mark
+          misleads everything that comes after it, hints included.</li>
+      <li><b>Pencilling a shortlist in</b> — when a bare cell turns out to have only two or three
+          options — is what turns a blank grid into something to reason about.</li>
+    </ul>
     <h4>What it knows</h4>
     <p>It tries the easy things first, so what you get is the simplest step available rather than
-       the cleverest: a cage down to its last cell, a cell only one digit fits, a digit with one
-       home left in some row, column, box or cage, then what a cage's total allows across its
-       remaining cells, and last the fact that <b>every row, column and box adds to 21</b> — which
-       gives away any cell a cage pokes in or out of one.</p>
+       the cleverest: a cage down to its last cell, a cell only one digit fits, a mark the grid has
+       already ruled out, a digit with one home left in a row, column or box, a mark the cage's
+       total rules out, what that total pins down, a digit the cage cannot do without, a digit
+       locked onto one line by its cage, the fact that <b>every row, column and box adds to 21</b>,
+       and last a shortlist for a cell that has none.</p>
     <h4>When it has nothing</h4>
     <p>It says so, and says which kind of nothing. Either something already entered is wrong — an
        empty cell nothing fits, or a cage that can no longer reach its total — in which case
