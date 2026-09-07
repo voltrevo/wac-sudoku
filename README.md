@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 68 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 94 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -79,6 +79,32 @@ Two things it declines to do, both for the same reason — it should not invent 
 did not make. A cell that nothing fits is left alone, because saying so is the conflict display's
 job. And a cage whose total demands a digit that is illegal there is left alone rather than filled
 with a knowingly wrong one.
+
+### Hints
+
+**A hint is a deduction, not a lookup.** Nothing behind it can see the solution — it works the board
+the way you would and stops at the first thing that follows, which is what lets it say *why*. Three
+taps, stop wherever you like:
+
+1. **Where** — highlights a cell, a cage or a region and says nothing else.
+2. **Why** — names the reasoning and leaves the arithmetic to you.
+3. **Just tell me** — writes the digit in. One Undo takes it back out.
+
+It tries the easy things first, so you get the simplest step available rather than the cleverest: a
+cage down to its last cell, a cell only one digit fits, a digit with one home left in a row, column
+or box, then what a cage's total allows across its remaining cells — enumerating whole assignments
+against each cell's candidates, not just which digits add up — then a digit the cage cannot do
+without, then **region arithmetic**: every row, column and box adds to 21, so a cage lying wholly
+inside one or poking a single cell out of one gives that cell away. Last come the same hunts again
+over what the cages have narrowed the cells to, which is two steps of reasoning rather than one.
+
+When nothing fires it says so, and says which kind of nothing — either something already entered is
+wrong, in which case Check progress is the tool, or the next step genuinely needs holding two
+possibilities at once. **It will never quietly read the answer to you because it ran out of ideas.**
+
+Measured by driving the real UI to completion and checking every digit against the answer: **664
+hints, none wrong**. From an empty grid it solves 4 puzzles in 10 unaided and honestly gives up on
+the rest; from eight correct digits in, 10 out of 10. A hint costs about 1.3 ms.
 
 ### Checking your progress
 
