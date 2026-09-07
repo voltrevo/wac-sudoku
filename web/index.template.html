@@ -757,6 +757,11 @@ function hunt(cand, pool, noted){
     const c = cages[k];
     if (!c || !c.any) continue;
     for (let d = 1; d <= N; d++){
+      // **`must`, not merely possible.** "Wherever it goes in this cage it lands on this line" is
+      // only an argument if the digit goes in the cage at all. Requiring it to be *placeable*
+      // there rules it out of the line even when the cage may not contain it — the same mistake as
+      // hunting hidden singles in a cage, and it silently finished five grids wrong.
+      if (!(c.must & BIT(d))) continue;
       const spots = c.cells.filter((i, t) => c.per[t] & BIT(d));
       if (!spots.length) continue;
       for (const [pick, band, label] of [[i => i / N | 0, ROWS, "row"], [i => i % N, COLS, "column"]]){

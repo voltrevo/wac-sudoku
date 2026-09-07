@@ -123,9 +123,20 @@ answer to you because it ran out of ideas.**
 
 The invariant is soundness relative to truthful input: given correct entries and marks that always
 contain the true digit, no hint may contradict the answer, and none may rub out a true digit.
-Measured by driving the real UI to a finished grid: **726 hints across two regimes, none unsound**,
-12 of 12 puzzles carried to a finish either way. Over 20 blank grids hinted to a stop, the mix was
-597 placements, 51 shortlists, 24 mark-eliminations and 5 honest stops. A hint costs about 1.3 ms.
+
+The sharpest test of that is to hint a **blank** grid to a standstill, because then every digit on
+the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
+Driving 30 puzzles that way, hints only:
+
+| given first | finishes | gives up honestly | finishes wrong |
+| --- | --- | --- | --- |
+| nothing | 11 | 19 | **0** |
+| 6 correct digits | 30 | 0 | **0** |
+| 10 correct digits | 30 | 0 | **0** |
+
+So it is not a solver: from cold it finishes about a third of puzzles and says so on the rest. Once
+you are six digits in it can always carry you, which is the shape worth having — you are not asking
+for a hint on move one. A hint costs about 1.3 ms.
 
 ### Checking your progress
 
