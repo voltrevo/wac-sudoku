@@ -105,12 +105,17 @@ Not every hint is a digit:
 - **Pencilling a shortlist in** — when a bare cell turns out to have only two or three options — is
   what turns a blank grid into something to reason about.
 
-**Every technique offers what it finds with a price on it, and the cheapest offer wins.** The order
+**Every technique offers what it finds with a price on it, and the best offer wins — cheapest per
+unit of progress, not simply cheapest.** A one-candidate elimination and a placement are not the
+same size of step, and ranking on effort alone let a cheap argument that rules out a single digit
+beat a dearer one that settles a cell outright. An argument that rules out several digits at once
+offers them together, so the moment they leave one digit standing it comes out as a placement
+rather than as a fourth elimination. The order
 the techniques happen to be written in is not a hierarchy, and while first-match-wins was picking
 the answer it was quietly preferring a two-step candidate argument over a two-cell cage adding to 4.
-`COST` states the ranking in one place, so "simplest available" is a claim the code can be checked
-against rather than an accident. The numbers rise with how many separate facts you must hold at
-once, plus a little for how much of the board you have to take in.
+`COST` states the effort side of that in one place, so it is a claim the code can be checked against
+rather than an accident. The numbers rise with how many separate facts you must hold at once, plus a
+little for how much of the board you have to take in.
 
 The cheap end is a cage down to its last cell, a small cage's total naming the only ways to make it,
 a cell only one digit fits, and a mark the grid has already ruled out. Then a digit with one home
