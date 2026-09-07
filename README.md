@@ -53,9 +53,9 @@ arrows, backspace, `N` notes, `U` undo, `[` and `]` for Prev and Next.
 The **☰ menu** holds **History**: puzzles you have finished, newest first, with how long each took
 and when you did it, then anything still in progress with how far in you are. Tap a row to go back
 to it. Revealing is not solving, so a puzzle whose answer you looked at is listed apart from the
-ones you finished. The menu also has **Report an issue**, which opens
-[the tracker](https://github.com/voltrevo/wac-sudoku/issues/new) in a new tab so a puzzle in
-progress is not lost.
+ones you finished. Below it are [the source](https://github.com/voltrevo/wac-sudoku) and
+[the tracker](https://github.com/voltrevo/wac-sudoku/issues/new), both opening in a new tab so a
+puzzle in progress is not lost. The title goes to the app root.
 
 ### Not spoiling it
 
