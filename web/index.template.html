@@ -11,14 +11,14 @@
   --bg:#f6f7f9; --panel:#fff; --ink:#1a1d21; --dim:#6b7280; --line:#ccd2d9;
   --thick:#1a1d21; --cage:#2f6fd0; --tint:#eceef1; --sel:#9cc4f5; --peer:#dfeafa;
   --same:#c3dbf8; --bad:#d92b2b; --good:#127a3d; --key:#fff; --keyb:#d3d9e0;
-  --acc:#2f6fd0;
+  --acc:#2f6fd0; --derived:#8a93a0;
 }
 @media (prefers-color-scheme:dark){
   :root{
     --bg:#101418; --panel:#171c22; --ink:#e8ecf1; --dim:#8b95a1; --line:#39424d;
     --thick:#e8ecf1; --cage:#6ea8fe; --tint:#1e242c; --sel:#3f6fae;
     --peer:#233a56; --same:#2c4a70; --bad:#ff6b6b; --good:#4ade80; --key:#212832;
-    --keyb:#333c46; --acc:#6ea8fe;
+    --keyb:#333c46; --acc:#6ea8fe; --derived:#7c8794;
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -80,6 +80,26 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
 .hrow .mark.ok{color:var(--good)}
 .hempty{font-size:14px;color:var(--dim);padding:2px 2px 0}
 
+/* ---- settings and prose ---- */
+.opt{display:flex;gap:12px;align-items:flex-start;padding:13px;border:1px solid var(--keyb);
+  border-radius:12px;background:var(--panel);cursor:pointer}
+.opt input{flex:0 0 auto;width:22px;height:22px;margin:1px 0 0;accent-color:var(--acc)}
+.opt .otxt{flex:1;min-width:0}
+.opt .oname{display:block;font-size:15px;font-weight:650}
+.opt .owhy{display:block;font-size:13px;color:var(--dim);margin-top:5px;line-height:1.5}
+.opt .owhy p{margin:0 0 7px}
+.opt .owhy p:last-child{margin:0}
+.prose{font-size:14.5px;line-height:1.6}
+.prose h4{font-size:13px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);
+  margin:16px 0 6px;font-weight:700}
+.prose h4:first-child{margin-top:0}
+.prose p{margin:0 0 9px}
+.prose ul{margin:0 0 9px;padding-left:19px}
+.prose li{margin:0 0 5px}
+.prose b{font-weight:650}
+.prose code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  background:var(--peer);padding:1px 5px;border-radius:5px}
+
 .seedbar{display:flex;gap:6px}
 .seedbar input{
   flex:1;min-width:0;padding:11px 12px;border:1px solid var(--keyb);border-radius:10px;
@@ -114,6 +134,9 @@ h1 a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius
 .cell.sel.bh{box-shadow:inset 0 0 0 2px var(--acc),inset 0 -2px 0 0 var(--thick)}
 .cell.sel.bw.bh{box-shadow:inset 0 0 0 2px var(--acc),inset -2px 0 0 0 var(--thick),inset 0 -2px 0 0 var(--thick)}
 .cell.bad{color:var(--bad)}
+/* Worked out from what you entered, not typed by you — and not yours to type over. */
+.cell.derived{color:var(--derived);font-weight:400}
+.cell.derived.bad{color:var(--bad)}
 .cell .n{position:absolute;inset:31% 5% 5%;display:grid;
   grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
   font-size:clamp(7px,2.4vw,10px);font-weight:600;color:var(--dim);line-height:1;pointer-events:none}
@@ -173,6 +196,8 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
       <button id="menu" type="button" aria-label="Menu" aria-expanded="false" aria-haspopup="true">☰</button>
       <nav class="menu" id="menupanel" hidden>
         <button id="mhistory" type="button">🕘&nbsp; History</button>
+        <button id="mhowto" type="button">📖&nbsp; How to play</button>
+        <button id="msettings" type="button">⚙️&nbsp; Settings</button>
         <div class="msep"></div>
         <a id="msource" href="https://github.com/voltrevo/wac-sudoku"
            target="_blank" rel="noopener noreferrer">💻&nbsp; Source on GitHub</a>
@@ -214,12 +239,12 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
 
   <div class="msg" id="msg"></div>
 
-  <section class="sheet" id="history" hidden aria-labelledby="htitle">
+  <section class="sheet" id="sheet" hidden aria-labelledby="sheettitle">
     <div class="sheethead">
-      <h2 id="htitle">History</h2>
-      <button id="hclose" type="button" aria-label="Close">✕</button>
+      <h2 id="sheettitle"></h2>
+      <button id="sheetclose" type="button" aria-label="Close">✕</button>
     </div>
-    <div class="sheetbody" id="hbody"></div>
+    <div class="sheetbody" id="sheetbody"></div>
   </section>
   <footer>Every row, column and 3×2 box holds 1–6 once.<br>
     Dashed cages add to their corner number, no digit twice inside one.</footer>
@@ -351,6 +376,13 @@ function cageSvg(cage, sums){
 /* ------------------------------------------------------------------ state */
 const $ = id => document.getElementById(id);
 let cage = null, sums = null, solution = null;   // solution stays in here and is never rendered
+let cageMembers = null;
+/* What the assist worked out, kept apart from what you typed. Nothing here is ever saved: it is a
+ * function of your own entries, so it is re-derived on load and vanishing is what turning the
+ * setting off should do. */
+let auto = null;
+const settings = { assist: false };
+const shown = i => val[i] || auto[i];
 let val = null, notes = null, undoStack = [], batch = null, sel = -1,
     noteMode = false, revealed = false;
 let seedText = "", t0 = 0, ticking = false, elapsed = 0;
@@ -377,13 +409,66 @@ for (let i = 0; i < CELLS; i++){
  * `solution`, so a highlighted mistake never tells you what the right digit was — only that what
  * is on the board cannot stand. The one place `solution` is read is reveal(), behind a confirm.
  */
+/* **Only what follows from what the player entered.** `solution` is not in scope of anything here,
+ * which is the point: this is the app doing the deduction a solver does without thinking, not the
+ * app peeking. Two rules, applied until neither says anything new:
+ *
+ *   - a cell whose row, column, box and cage between them leave exactly one digit
+ *   - a cage down to its last empty cell, which the total then names
+ *
+ * The masks are updated as cells are filled inside a pass, not just between passes. Without that,
+ * two cells in one row could both be handed the same digit off a stale mask — which only happens
+ * when the player has already gone wrong, and would blame the assist for it.
+ */
+function deriveAuto(){
+  auto.fill(0);
+  if (!settings.assist) return;
+
+  for (let pass = 0; pass <= CELLS; pass++){
+    const row = new Array(N).fill(0), col = new Array(N).fill(0),
+          box = new Array(N).fill(0), cg = new Array(sums.length).fill(0);
+    for (let i = 0; i < CELLS; i++){
+      const v = shown(i);
+      if (v) { const b = 1 << v; row[i / N | 0] |= b; col[i % N] |= b; box[boxOf(i)] |= b; cg[cage[i]] |= b; }
+    }
+    const usedAt = i => row[i / N | 0] | col[i % N] | box[boxOf(i)] | cg[cage[i]];
+    const fill = (i, d) => {
+      auto[i] = d;
+      const b = 1 << d;
+      row[i / N | 0] |= b; col[i % N] |= b; box[boxOf(i)] |= b; cg[cage[i]] |= b;
+    };
+    let changed = false;
+
+    for (let i = 0; i < CELLS; i++){
+      if (shown(i)) continue;
+      const used = usedAt(i);
+      let only = 0, n = 0;
+      for (let d = 1; d <= N; d++) if (!(used & (1 << d))){ only = d; if (++n > 1) break; }
+      // n === 0 is a cell nothing fits: the player has gone wrong, and saying so is the conflict
+      // display's job, not this one's.
+      if (n === 1){ fill(i, only); changed = true; }
+    }
+
+    for (let k = 0; k < sums.length; k++){
+      let empty = -1, acc = 0, n = 0;
+      for (const i of cageMembers[k]){ const v = shown(i); if (v) acc += v; else { empty = i; n++; } }
+      if (n !== 1) continue;
+      const need = sums[k] - acc;
+      // Refused when the total demands a digit that is not legal there — writing a knowingly wrong
+      // digit would be the assist inventing the mistake rather than the player.
+      if (need >= 1 && need <= N && !(usedAt(empty) & (1 << need))){ fill(empty, need); changed = true; }
+    }
+    if (!changed) return;
+  }
+}
+
 function conflicts(){
   const bad = new Set();
   const seen = (get) => {
     for (let g = 0; g < N; g++){
       const at = new Map();
       for (let k = 0; k < N; k++){
-        const i = get(g, k), v = val[i];
+        const i = get(g, k), v = shown(i);
         if (!v) continue;
         if (at.has(v)){ bad.add(i); bad.add(at.get(v)); } else at.set(v, i);
       }
@@ -400,36 +485,38 @@ function conflicts(){
     const m = members[k], at = new Map();
     let acc = 0, filled = 0;
     for (const i of m){
-      const v = val[i];
+      const v = shown(i);
       if (!v) continue;
       filled++; acc += v;
       if (at.has(v)){ bad.add(i); bad.add(at.get(v)); } else at.set(v, i);
     }
     const over = acc > sums[k], wrong = filled === m.length && acc !== sums[k];
-    if (over || wrong) for (const i of m) if (val[i]) bad.add(i);
+    if (over || wrong) for (const i of m) if (shown(i)) bad.add(i);
   }
   return bad;
 }
 
 function draw(){
+  deriveAuto();
   const bad = conflicts();
-  const selV = sel >= 0 ? val[sel] : 0;
+  const selV = sel >= 0 ? shown(sel) : 0;
   const selR = sel >= 0 ? sel / N | 0 : -1, selC = sel >= 0 ? sel % N : -1;
   const selB = sel >= 0 ? boxOf(sel) : -1;
   for (let i = 0; i < CELLS; i++){
-    const el = cellEls[i], v = val[i];
+    const el = cellEls[i], v = shown(i);
     el.classList.toggle("sel",  i === sel);
     el.classList.toggle("peer", i !== sel && sel >= 0 &&
       ((i / N | 0) === selR || i % N === selC || boxOf(i) === selB));
     el.classList.toggle("same", i !== sel && !!v && v === selV);
     el.classList.toggle("bad",  bad.has(i));
+    el.classList.toggle("derived", !val[i] && !!auto[i]);
     el.firstChild.textContent = v ? v : "";
     let n = "";
     if (!v) for (let d = 1; d <= N; d++) n += `<span>${notes[i].has(d) ? d : ""}</span>`;
     el.lastChild.innerHTML = n;
   }
   const left = new Array(N + 1).fill(N);
-  for (let i = 0; i < CELLS; i++) if (val[i]) left[val[i]]--;
+  for (let i = 0; i < CELLS; i++) if (shown(i)) left[shown(i)]--;
   for (let d = 1; d <= N; d++){
     const b = $("pad").children[d - 1];
     b.classList.toggle("spent", left[d] <= 0);
@@ -437,7 +524,7 @@ function draw(){
   }
   $("undo").disabled = undoStack.length === 0;
   $("reveal").disabled = revealed;
-  const full = val.every(v => v > 0);
+  const full = val.every((v, i) => shown(i) > 0);
   const won = full && bad.size === 0;
   $("board").classList.toggle("done", won);
   if (won){
@@ -468,6 +555,8 @@ function commit(){
 
 function place(d){
   if (sel < 0 || revealed) return;
+  // A worked-out cell is not yours to type over; the digit it followed from is.
+  if (!val[sel] && auto[sel]) return;
   start();
   begin();
   if (noteMode){
@@ -492,6 +581,7 @@ function place(d){
 
 function erase(){
   if (sel < 0 || revealed || (!val[sel] && notes[sel].size === 0)) return;
+  if (!val[sel] && auto[sel]) return;
   begin(); touch(sel); val[sel] = 0; notes[sel].clear(); commit();
   draw();
 }
@@ -588,6 +678,15 @@ async function openStore(){
   // appended, so a half-written flush costs recency rather than a puzzle.
   const known = Array.isArray(saved) ? saved.filter(k => store.has(k)) : [];
   order = [...known, ...keys.filter(k => !known.includes(k))];
+
+  const kept = await done(db.transaction(META, "readonly").objectStore(META).get("settings"));
+  if (kept && typeof kept === "object") Object.assign(settings, kept);
+}
+
+function saveSettings(){
+  if (!db) return;
+  try { db.transaction(META, "readwrite").objectStore(META).put({ ...settings }, "settings"); }
+  catch (e) { /* the setting still holds for this session */ }
 }
 
 /* Writes are coalesced: `draw()` runs on every keystroke and each one would otherwise be its own
@@ -734,7 +833,11 @@ function build(text){
   sums     = Array.from(a.slice(1 + CELLS, 1 + CELLS + nc));
   solution = Array.from(a.slice(1 + CELLS + nc));
 
+  cageMembers = sums.map(() => []);
+  for (let i = 0; i < CELLS; i++) cageMembers[cage[i]].push(i);
+
   val = new Array(CELLS).fill(0);
+  auto = new Array(CELLS).fill(0);
   notes = Array.from({ length: CELLS }, () => new Set());
   undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
   solvedAt = 0; solvedIn = 0;
@@ -818,25 +921,104 @@ function section(title, list, empty){
        + `</div>`;
 }
 
-function renderHistory(){
+function historyHTML(){
   const rows = rowsFor();
-  const done = rows.filter(r => r.solved).sort((a, b) => b.at - a.at);
+  const finished = rows.filter(r => r.solved).sort((a, b) => b.at - a.at);
   // Anything touched but not finished, newest first — `order` is already in that order.
   const open = rows.filter(r => !r.solved && (r.filled || r.noted || r.revealed));
-  $("hbody").innerHTML =
-      section(`Completed${done.length ? ` (${done.length})` : ""}`, done,
-              "None yet. Finish one and it will show up here.")
-    + section("Recently edited", open, "Nothing in progress.");
-  for (const el of $("hbody").querySelectorAll(".hrow"))
-    el.addEventListener("click", () => { closeSheet(); build(el.dataset.seed); });
+  return section(`Completed${finished.length ? ` (${finished.length})` : ""}`, finished,
+                 "None yet. Finish one and it will show up here.")
+       + section("Recently edited", open, "Nothing in progress.");
+}
+
+function settingsHTML(){
+  return `<label class="opt">
+    <input type="checkbox" id="optassist"${settings.assist ? " checked" : ""}>
+    <span class="otxt">
+      <span class="oname">Fill in the forced cells</span>
+      <span class="owhy">
+        <p>When a cell's row, column, box and cage between them leave only one digit, the app writes
+           it in. When a cage is down to its last empty cell, the total names it. Every fill can
+           force another, so it keeps going until nothing more follows.</p>
+        <p>It only ever does what follows from what <em>you</em> have entered — it never looks at the
+           answer. But it is also the part of solving you would do without thinking, and it cascades:
+           across a dozen test puzzles it finished the grid by itself once about a third of the cells
+           were in. If you want the whole puzzle, leave this off.</p>
+        <p>Worked-out digits show in grey and you cannot type over them; change the digit they
+           followed from instead. Turning this off takes them away again — they are never saved as
+           yours.</p>
+      </span>
+    </span>
+  </label>`;
+}
+
+function howtoHTML(){
+  return `<div class="prose">
+    <h4>The grid</h4>
+    <p>Every <b>row</b>, every <b>column</b> and every <b>3×2 box</b> holds the digits 1 to 6, each
+       once.</p>
+    <h4>The cages</h4>
+    <p>The dashed outlines are cages. The small number in a cage's top-left corner is what its cells
+       add up to, and <b>no digit repeats inside a cage</b> — which is what makes the totals worth
+       more than arithmetic. A two-cell cage adding to 3 can only be 1 and 2.</p>
+    <p>Every cage total together comes to 126, because that is 6 × 21.</p>
+    <h4>Playing</h4>
+    <ul>
+      <li>Tap a cell, then a digit. Tapping the same digit again takes it out.</li>
+      <li><b>Notes</b> writes small pencil marks instead. Committing a digit rubs it out of the
+          pencil marks of every cell that shares a row, column, box or cage with it.</li>
+      <li><b>Undo</b> steps back one action, however many cells that action moved.</li>
+      <li><b>Clear</b> starts the puzzle over. It is one Undo away, so it does not stop to ask.</li>
+      <li><b>Reveal</b> shows the answer, behind a confirmation. Undo puts your grid back.</li>
+      <li>The counter under each digit is how many of it are left to place.</li>
+      <li>Red means the board breaks a rule — a repeat, or a cage that cannot add up. It never tells
+          you what the digit should have been.</li>
+      <li><b>Settings</b> has an opt-in that fills in cells whose digit is forced by what you have
+          already entered. Off by default, and it cascades — read the note beside it first.</li>
+    </ul>
+    <h4>Seeds</h4>
+    <p>A puzzle's name is a word pair and a number, like <code>brisk-otter-07</code>. The same name
+       always gives the same puzzle on any device, so it is shareable as a link.
+       <b>Next</b> and <b>Prev</b> walk the number and wrap, giving a hundred puzzles per name. Your
+       last hundred grids are kept, so stepping away and back loses nothing.</p>
+    <p>Open the app with no link and you get the puzzle you were last on. A brand new visitor gets
+       one named after today's date, so everyone starting fresh on the same day plays the same
+       puzzles.</p>
+    <h4>Keyboard</h4>
+    <p><code>1</code>–<code>6</code> place, arrows move, <code>Backspace</code> erases,
+       <code>N</code> toggles notes, <code>U</code> undoes, <code>[</code> and <code>]</code> step
+       between puzzles, <code>Esc</code> closes a panel.</p>
+  </div>`;
 }
 
 function openMenu(on){
   $("menupanel").hidden = !on;
   $("menu").setAttribute("aria-expanded", String(on));
 }
-function openSheet(){ renderHistory(); $("history").hidden = false; }
-function closeSheet(){ $("history").hidden = true; }
+function showSheet(title, html, after){
+  $("sheettitle").textContent = title;
+  $("sheetbody").innerHTML = html;
+  $("sheet").hidden = false;
+  $("sheetbody").scrollTop = 0;
+  if (after) after();
+}
+function closeSheet(){ $("sheet").hidden = true; }
+
+function openHistory(){
+  showSheet("History", historyHTML(), () => {
+    for (const el of $("sheetbody").querySelectorAll(".hrow"))
+      el.addEventListener("click", () => { closeSheet(); build(el.dataset.seed); });
+  });
+}
+function openSettings(){
+  showSheet("Settings", settingsHTML(), () => {
+    $("optassist").addEventListener("change", e => {
+      settings.assist = e.target.checked;
+      saveSettings();
+      draw();                 // `deriveAuto` runs from `draw`, so this both fills and unfills
+    });
+  });
+}
 
 /* ------------------------------------------------------------------ wiring */
 for (let d = 1; d <= N; d++){
@@ -860,7 +1042,9 @@ $("erase").addEventListener("click", erase);
 $("undo").addEventListener("click", undo);
 $("clear").addEventListener("click", clearAll);
 $("menu").addEventListener("click", e => { e.stopPropagation(); openMenu($("menupanel").hidden); });
-$("mhistory").addEventListener("click", () => { openMenu(false); openSheet(); });
+$("mhistory").addEventListener("click", () => { openMenu(false); openHistory(); });
+$("mhowto").addEventListener("click", () => { openMenu(false); showSheet("How to play", howtoHTML()); });
+$("msettings").addEventListener("click", () => { openMenu(false); openSettings(); });
 for (const id of ["msource", "missue"]) $(id).addEventListener("click", () => openMenu(false));
 
 /* The app root. Dropping the fragment is a same-document change, so the browser would re-run
@@ -872,7 +1056,7 @@ $("home").addEventListener("click", e => {
   history.replaceState(null, "", location.pathname + location.search);
   location.reload();
 });
-$("hclose").addEventListener("click", closeSheet);
+$("sheetclose").addEventListener("click", closeSheet);
 document.addEventListener("click", e => { if (!$("menupanel").hidden && !e.target.closest(".hgroup")) openMenu(false); });
 $("reveal").addEventListener("click", () => {
   if (revealed) return;
@@ -884,7 +1068,7 @@ $("yes").addEventListener("click", reveal);
 
 addEventListener("keydown", e => {
   if (e.key === "Escape"){ openMenu(false); closeSheet(); return; }
-  if (!$("history").hidden) return;          // the sheet is over the board; do not play through it
+  if (!$("sheet").hidden) return;            // the sheet is over the board; do not play through it
   if (e.target.tagName === "INPUT") return;
   if (e.key >= "1" && e.key <= "6"){ place(+e.key); e.preventDefault(); return; }
   if (e.key === "Backspace" || e.key === "Delete" || e.key === "0"){ erase(); e.preventDefault(); return; }

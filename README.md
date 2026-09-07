@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 62 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 68 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -10,6 +10,7 @@ Type a seed, get a puzzle, solve it on your phone.
 
 <img src="docs/screenshot.png" alt="A 6x6 killer sudoku part-solved, with dashed cages, pencil marks and a digit pad" width="300">
 <img src="docs/history.png" alt="The history panel, listing completed puzzles with their times and puzzles still in progress" width="300">
+<img src="docs/settings.png" alt="The settings page explaining the opt-in that fills in forced cells" width="300">
 
 ```
 ./bootstrap.sh          # dist/index.html
@@ -53,9 +54,31 @@ arrows, backspace, `N` notes, `U` undo, `[` and `]` for Prev and Next.
 The **☰ menu** holds **History**: puzzles you have finished, newest first, with how long each took
 and when you did it, then anything still in progress with how far in you are. Tap a row to go back
 to it. Revealing is not solving, so a puzzle whose answer you looked at is listed apart from the
-ones you finished. Below it are [the source](https://github.com/voltrevo/wac-sudoku) and
+ones you finished. **How to play** has the rules and the controls. **Settings** has the assist
+below. Below those are [the source](https://github.com/voltrevo/wac-sudoku) and
 [the tracker](https://github.com/voltrevo/wac-sudoku/issues/new), both opening in a new tab so a
 puzzle in progress is not lost. The title goes to the app root.
+
+### Filling in the forced cells
+
+Off by default, opt in under **Settings**. When a cell's row, column, box and cage between them
+leave only one digit, the app writes it in; when a cage is down to its last empty cell, the total
+names it. Every fill can force another, so it runs to a fixed point.
+
+**It only ever does what follows from what you entered.** `deriveAuto` has no access to `solution` —
+this is the app doing the deduction a solver does without thinking, not the app peeking. It is still
+a real assist and it cascades: across a dozen test puzzles it finished the grid by itself once about
+a third of the cells were in, which the note beside the checkbox says plainly.
+
+Worked-out digits are held in a separate array from the player's own and shown in grey. That is why
+**nothing derived is ever saved** — it is a function of your entries, so it is re-derived on load,
+and turning the setting off simply stops deriving it rather than having to unpick anything. You
+cannot type over a derived cell; the digit it followed from is the one to change.
+
+Two things it declines to do, both for the same reason — it should not invent a mistake the player
+did not make. A cell that nothing fits is left alone, because saying so is the conflict display's
+job. And a cage whose total demands a digit that is illegal there is left alone rather than filled
+with a knowingly wrong one.
 
 ### Not spoiling it
 
