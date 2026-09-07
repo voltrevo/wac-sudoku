@@ -110,8 +110,17 @@ state" instead.
 Storage is **IndexedDB**, which keeps a byte array as bytes rather than stringifying it — and
 `github.io` is a single origin for every project published under it, so the localStorage budget was
 never ours alone. Everything is mirrored in memory at startup, so reads are synchronous and only
-writes go to disk, coalesced. Anything the localStorage version left behind is migrated once, then
-removed.
+writes go to disk, coalesced.
+
+Anything the localStorage version left behind is migrated once. The old keys are removed only after
+the new bytes are **on disk** — the transaction is awaited rather than queued, because a coalesced
+write that had not landed would have taken the grids with it if the tab closed in between. A failed
+write leaves the originals alone and the next visit tries again.
+
+The migration is stamped `2026-09-07` and stops running sixty days later. Past that it is dead code:
+delete `migrate`, `forgetOld`, the three constants and the one call, and nothing else refers to
+them. The trade is deliberate — someone who has not opened the app for two months loses grids saved
+under the old format.
 
 **Undo is not saved and is not meant to be.** It lives in memory for one puzzle: `build()` resets it
 on every switch, so it never outlives the grid it describes.

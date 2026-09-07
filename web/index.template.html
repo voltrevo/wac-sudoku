@@ -571,16 +571,43 @@ function load(){
   return true;
 }
 
-/* One-time move of anything the localStorage version left behind. Re-encoding needs each puzzle's
- * answer, so this regenerates them — about 2ms each, once, for at most ten. */
-function migrate(){
+/* A one-time move of anything the localStorage version left behind.
+ *
+ * **Stamped 2026-09-07, stops running after sixty days.** That is long enough for anyone who was
+ * mid-puzzle to come back, and past it this is dead code that can go without anyone having to work
+ * out whether it is still load-bearing: delete `migrate`, `forgetOld`, the three constants and the
+ * one call, and nothing else refers to them.
+ *
+ * **The old keys go only once the new bytes are on disk.** Awaiting the transaction rather than
+ * queueing it through `writeSoon`, because a coalesced write that had not landed yet would have
+ * taken the grids with it if the tab closed in between — which is what the first version of this
+ * did.
+ */
+const MIGRATION_WRITTEN = "2026-09-07";
+const MIGRATION_DAYS = 60;
+const MIGRATION_EXPIRES = Date.parse(MIGRATION_WRITTEN) + MIGRATION_DAYS * 86400e3;
+
+function forgetOld(seeds){
+  try {
+    for (const s of seeds) localStorage.removeItem("ks6:" + s);
+    localStorage.removeItem("ks6:recent");
+  } catch (e) { /* nothing to be done */ }
+}
+
+async function migrate(){
+  if (Date.now() > MIGRATION_EXPIRES) return;
+
   let seeds;
   try {
     const raw = localStorage.getItem("ks6:recent");
     if (!raw) return;
     seeds = JSON.parse(raw);
-    if (!Array.isArray(seeds)) return;
+    if (!Array.isArray(seeds) || !seeds.length) return;
   } catch (e) { return; }
+
+  // Re-encoding needs each puzzle's answer, so this regenerates them — about 2ms each, once, for
+  // at most ten.
+  const moved = [];
   for (const s of seeds.slice().reverse()){          // oldest first, so the order comes out right
     try {
       const o = JSON.parse(localStorage.getItem("ks6:" + s));
@@ -591,15 +618,28 @@ function migrate(){
       while (masks.length < CELLS) masks.push(0);
       const bytes = packState(sol, o.v, masks, o.e || 0, !!o.r);
       store.set(s, bytes);
-      pending.set(s, bytes);
       order = [s, ...order.filter(x => x !== s)];
+      moved.push([s, bytes]);
     } catch (e) { /* one unreadable entry should not stop the rest */ }
   }
+
+  // Nothing readable to move: the keys are rubbish either way, so they still go.
+  if (!moved.length){ forgetOld(seeds); return; }
+  // Nowhere to put them. Leave the originals alone so a later visit can try again.
+  if (!db) return;
+
   try {
-    for (const s of seeds) localStorage.removeItem("ks6:" + s);
-    localStorage.removeItem("ks6:recent");
-  } catch (e) { /* nothing to be done */ }
-  writeSoon();
+    const tx = db.transaction([PUZZLES, META], "readwrite");
+    for (const [s, bytes] of moved) tx.objectStore(PUZZLES).put(bytes, s);
+    tx.objectStore(META).put(order.slice(), "order");
+    await new Promise((res, rej) => {
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  } catch (e) { return; }        // not on disk, so the originals stay put
+
+  forgetOld(seeds);
 }
 
 /* ------------------------------------------------------------- new puzzle */
@@ -707,7 +747,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden){ stop
 /* A link decides the puzzle; failing that, the one you were last on. `recent()` is ordered by
  * `remember()`, which `build()` calls — so its head is the last puzzle actually opened, and the
  * grid for it is still held. Only a browser that has never been here gets a new name. */
-try { await openStore(); migrate(); }
+try { await openStore(); await migrate(); }
 catch (e) { /* no IndexedDB — private mode, or it is disabled. Play; do not persist. */ }
 build(decodeURIComponent(location.hash.slice(1)) || recent()[0] || todayName());
 </script>
