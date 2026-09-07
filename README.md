@@ -24,7 +24,13 @@ corner, and no digit repeats inside a cage.
 The app prefills a seed as an adjective–animal pair — `brisk-otter`, `tawny-heron` — hashed to a
 32-bit integer with FNV-1a. The same seed always produces the same puzzle on any device, and it
 lives in the URL hash, so a puzzle is a link. Open the app with no link and it returns to the
-puzzle you were last on, grid and all; only a browser that has never been here gets a new name.
+puzzle you were last on, grid and all.
+
+Only a browser that has never been here needs a name picked for it, and that one comes from
+**today's local date** rather than from chance — so everyone starting fresh on the same day is on
+the same puzzle, and Next walks them through the same sequence. Local, not UTC: the day you are
+having is the one on your wall, and a player just after midnight should get tomorrow's puzzle
+rather than yesterday's.
 
 A seed is a name and a two-digit number: `brisk-otter-07`. Type one without a number and it *is*
 that name at `-00`, so **Next** and **Prev** always have somewhere to go. They walk the number and

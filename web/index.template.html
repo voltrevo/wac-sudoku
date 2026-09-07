@@ -194,8 +194,16 @@ const ANI = ["adder","albatross","antelope","badger","barnacle","bass","bat","be
 "thrush","tiger","turnstone","viper","vole","vulture","wagtail","walrus","warbler","weasel","whimbrel",
 "wigeon","wolf","wombat","woodcock","wren","yak","zebra"];
 
-const pick = a => a[(crypto.getRandomValues(new Uint32Array(1))[0]) % a.length];
-const freshName = () => pick(ADJ) + "-" + pick(ANI);
+/* The default name comes from the date rather than from chance, so two people opening the app on
+ * the same day are on the same puzzles and can compare — and Next walks both of them through the
+ * same sequence. The *local* date, not UTC: the day you are having is the one on your wall, and a
+ * player just after midnight should get tomorrow's rather than yesterday's. */
+function todayName(){
+  const d = new Date(), pad = n => String(n).padStart(2, "0");
+  let h = hash(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`) >>> 0;
+  const draw = a => { h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0; return a[h % a.length]; };
+  return draw(ADJ) + "-" + draw(ANI);
+}
 
 /* A seed is a name and a two-digit number — `brisk-otter-07`. A seed typed without one *is* that
  * name at -00, so Next and Prev always have somewhere to go. They wrap, which is why Prev from
@@ -502,7 +510,7 @@ function load(){
 function build(text){
   const typed = text.trim().toLowerCase().replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
   let { base, n } = splitSeed(typed);
-  if (!base) base = freshName();          // "-07" on its own names no puzzle
+  if (!base) base = todayName();          // "-07" on its own names no puzzle
   seedText = seedName(base, n);
   $("seed").value = seedText;
   location.hash = encodeURIComponent(seedText);
@@ -602,7 +610,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden){ stop
 /* A link decides the puzzle; failing that, the one you were last on. `recent()` is ordered by
  * `remember()`, which `build()` calls — so its head is the last puzzle actually opened, and the
  * grid for it is still held. Only a browser that has never been here gets a new name. */
-build(decodeURIComponent(location.hash.slice(1)) || recent()[0] || freshName());
+build(decodeURIComponent(location.hash.slice(1)) || recent()[0] || todayName());
 </script>
 </body>
 </html>
