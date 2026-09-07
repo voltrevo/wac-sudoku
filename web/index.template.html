@@ -1258,27 +1258,40 @@ function refute(start, digit, noted, cap){
 }
 
 function tryOne(pool, noted){
-  const order = [...Array(CELLS).keys()]
-    .filter(i => !shown(i) && countOf(pool[i]) >= 2 && countOf(pool[i]) <= 3)
-    .sort((a, b) => countOf(pool[a]) - countOf(pool[b]));
-  let best = null, budget = 40;
-  for (const i of order){
-    const opts = [];
-    for (let d = 1; d <= N; d++) if (pool[i] & BIT(d)) opts.push(d);
-    const dead = [];
-    for (const d of opts){
-      if (budget-- <= 0) break;
-      const rounds = refute(i, d, noted, 5);
-      if (rounds === null) continue;
-      dead.push(d);
-      if (!best || rounds < best.rounds || (rounds === best.rounds && opts.length < best.opts))
-        best = { cell: i, digit: d, rounds, opts: opts.length };
+  const ALL = (1 << (N + 1)) - 2;
+  /* Only cells where the conclusion can actually be written down: one already pencilled, or a bare
+   * one with all six open, where "everything but d" says exactly the elimination and no more. */
+  const expressible = i => noted[i] !== 0 || pool[i] === ALL;
+  let budget = 150;
+
+  /* Narrowest cells first, and within a width the guess that fails soonest. Widening only when a
+   * width offers nothing: refuting one of two options settles a cell, refuting one of six barely
+   * dents it — but a hint about six options beats no hint, which is what stopping at three gave.
+   * On the boards this used to fail, not one narrow cell was refutable and there were dozens of
+   * refutations waiting on wider ones. */
+  for (let width = 2; width <= N; width++){
+    const cells = [...Array(CELLS).keys()]
+      .filter(i => !shown(i) && countOf(pool[i]) === width && expressible(i));
+    let best = null;
+    for (const i of cells){
+      const opts = [];
+      for (let d = 1; d <= N; d++) if (pool[i] & BIT(d)) opts.push(d);
+      const dead = [];
+      for (const d of opts){
+        if (budget-- <= 0) break;
+        const rounds = refute(i, d, noted, 5);
+        if (rounds === null) continue;
+        dead.push(d);
+        if (!best || rounds < best.rounds) best = { cell: i, digit: d, rounds, opts: width };
+      }
+      // Every option gone is not a hint, it is a report: something already down is wrong.
+      if (dead.length && dead.length === opts.length) return { allDead: i };
+      if (best && best.rounds === 0) break;
     }
-    // Every option gone is not a hint, it is a report: something already down is wrong.
-    if (dead.length && dead.length === opts.length) return { allDead: i };
-    if (best && best.rounds === 0) break;
+    if (best) return best;
+    if (budget <= 0) break;
   }
-  return best;
+  return null;
 }
 
 /**
@@ -2129,9 +2142,9 @@ function hintHelpHTML(){
     <p>Past that it stops. What is left needs assuming something and seeing it fail, which is the
        puzzle rather than a gap in the hints.</p>
     <h4>When nothing follows</h4>
-    <p>Then it stops explaining and starts suggesting. It picks a cell with barely any options left
-       and says <b>think about what happens if this were a 4</b> — choosing whichever guess falls
-       over soonest, so you are following one or two forced moves to a wall rather than wandering.
+    <p>Then it stops explaining and starts suggesting. It picks the narrowest cell it can and says
+       <b>think about what happens if this were a 4</b> — choosing whichever guess falls over
+       soonest, so you are following one or two forced moves to a wall rather than wandering.
        That is still a proof: a digit that leads to a cell with nothing in it, or a cage that cannot
        reach its total, is genuinely impossible. It is just the one argument you have to walk into
        rather than see.</p>
