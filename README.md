@@ -110,9 +110,15 @@ Not every hint is a digit:
 **Every technique offers what it finds with a price on it, and the best offer wins — cheapest per
 unit of progress, not simply cheapest.** A one-candidate elimination and a placement are not the
 same size of step, and ranking on effort alone let a cheap argument that rules out a single digit
-beat a dearer one that settles a cell outright. An argument that rules out several digits at once
-offers them together, so the moment they leave one digit standing it comes out as a placement
-rather than as a fourth elimination. The order
+beat a dearer one that settles a cell outright. 
+
+**A hint also states everything it does.** An argument that rules out several digits from several
+cells offers all of them together — two cells that must add to 9 are each one of 3, 4, 5 and 6, so
+both shed both 1 and 2, and a hint naming one cell and one digit tells a quarter of the story.
+Taking the hint applies the lot, and where it leaves a single digit standing it comes out as a
+placement rather than as another elimination. One hint in the wild clears 3 digits from 6 cells.
+
+The order
 the techniques happen to be written in is not a hierarchy, and while first-match-wins was picking
 the answer it was quietly preferring a two-step candidate argument over a two-cell cage adding to 4.
 `COST` states the effort side of that in one place, so it is a claim the code can be checked against
