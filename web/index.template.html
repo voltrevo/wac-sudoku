@@ -1274,18 +1274,33 @@ function hunt(cand, pool, noted){
   for (let k = 0; k < sums.length; k++){
     const c = cages[k];
     if (!c || !c.any || c.m < 2 || c.m > 3) continue;
+    /* Every empty cell the cage narrows, not the first — the arithmetic that shortens one of them
+     * usually shortens its neighbour in exactly the same way, and saying so once is the whole
+     * argument rather than half of it. Grouped by the options they end up with, so the sentence
+     * can speak about all of them at once. */
+    const same = new Map();
     for (let t = 0; t < c.m; t++){
       const i = c.cells[t];
       if (shown(i) || noted[i]) continue;
       const n = countOf(c.per[t]);
       if (n < 2 || n > 3 || n >= countOf(cand[i])) continue;
-      offer(COST.cageShortlist + n, shaped({ kind: "note", cell: i, digits: c.per[t],
-        where: `Look at the [[p|cage]].`,
-        why: `Its ${c.m} cells must be ${c.m} different digits adding to ${sums[k]}. There are not` +
-             ` many ways to do that, and every one of them leaves the [[a|cell]] with the same` +
-             ` ${n} options.` }, [["p", cageMembers[k]]]));
-      break;
+      if (!same.has(c.per[t])) same.set(c.per[t], []);
+      same.get(c.per[t]).push(i);
     }
+    if (!same.size) continue;
+    const [opts, who] = [...same].sort((a, b) => b[1].length - a[1].length)[0];
+    const n = countOf(opts);
+    const whole = c.m === cageMembers[k].length;
+    offer(COST.cageShortlist + n, shaped({ kind: "cut", asList: true,
+      mask: ALL & ~opts, cell: who[0],
+      targets: who.map(i => ({ cell: i, before: pool[i], left: opts })),
+      where: cageMembers[k].some(i => !who.includes(i))
+        ? `Look at the [[p|cage]].` : `Look at the cage these cells make up.`,
+      why: `Its ${c.m} empty cells must be ${c.m} different digits adding to ${c.need}` +
+           `${whole ? "" : ", once you take off what is already in it"}. There are not many ways to` +
+           ` do that, and every one of them leaves ${who.length > 1 ? "each [[a|cell]]" :
+           "the [[a|cell]]"} with the same ${n} options.` },
+      cageMembers[k].some(i => !who.includes(i)) ? [["p", cageMembers[k]]] : [], who));
   }
 
   for (const limit of [2, 3, 4, 5]){
@@ -1579,6 +1594,12 @@ const conclusionOf = h =>
             ? `The [[a|cell]] is either ${listOf(t.left).replace(" and ", " or ")}.`
             : `The [[a|cell]] is one of ${listOf(t.left)}.`;
       }
+      // Say it whichever way is shorter: what they cannot be, or what they are down to.
+      const left = h.targets[0].left;
+      const alike = h.targets.every(t => t.left === left);
+      if (alike && countOf(left) <= countOf(off))
+        return `Each of the [[a|cells]] is ${countOf(left) === 2
+          ? `either ${listOf(left).replace(" and ", " or ")}` : `one of ${listOf(left)}`}.`;
       const who = h.targets.length === 2 ? `Neither [[a|cell]]` : `None of the [[a|cells]]`;
       return `${who} can be ${listOf(off).replace(" and ", " or ")}.`;
     })()
