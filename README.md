@@ -2,13 +2,14 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 51 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 62 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
 **[Play it](https://voltrevo.github.io/wac-sudoku/)**
 
-<img src="docs/screenshot.png" alt="A 6x6 killer sudoku part-solved, with dashed cages, pencil marks and a digit pad" width="330">
+<img src="docs/screenshot.png" alt="A 6x6 killer sudoku part-solved, with dashed cages, pencil marks and a digit pad" width="300">
+<img src="docs/history.png" alt="The history panel, listing completed puzzles with their times and puzzles still in progress" width="300">
 
 ```
 ./bootstrap.sh          # dist/index.html
@@ -48,6 +49,11 @@ moved, so undoing that placement puts the digit *and* every note it rubbed out b
 starts the puzzle over, clock included, and is itself one undo away — which is why it does not
 stop to ask. The pad counts how many of each digit are left to place. Keyboard works too: `1`–`6`,
 arrows, backspace, `N` notes, `U` undo, `[` and `]` for Prev and Next.
+
+The **☰ menu** holds **History**: puzzles you have finished, newest first, with how long each took
+and when you did it, then anything still in progress with how far in you are. Tap a row to go back
+to it. Revealing is not solving, so a puzzle whose answer you looked at is listed apart from the
+ones you finished.
 
 ### Not spoiling it
 
@@ -94,13 +100,24 @@ What remains is two bit vectors and a short list:
 3-7      which cells are filled            36 bits
 8-34     pencil marks, six bits per cell   216 bits
 35-37    seconds on the clock              24 bits
-38       flags — bit 0 is `revealed`
+38       flags — bit 0 `revealed`, bit 1 `solved`
 39       how many cells are wrong, W
-40..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
+40-43    solved at, unix seconds           32 bits, zero if it never was
+44-46    solved in, seconds on the clock   24 bits
+47..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
 ```
 
-Forty bytes covers every realistic state, including a grid pencilled in every cell with all six
-candidates — which the JSON this replaced spent 611 characters on. A hundred puzzles is 4 KB.
+Forty-seven bytes covers every realistic state, including a grid pencilled in every cell with all
+six candidates — which the JSON this replaced spent 611 characters on. A hundred puzzles is 4.8 KB.
+
+When it was solved and how long it took are kept apart from the running clock, because Clear resets
+the clock and starting a solved puzzle over should not un-solve it in the history. Everything the
+history list shows lives in this header, so `summaryState` reads a row straight out of the bytes —
+no solution, and so no regenerating a hundred puzzles to draw a list. Only the *digits* need the
+answer, and a list does not show digits.
+
+Version 1 states are still read, so nothing saved before the completion fields existed is thrown
+away for being old.
 
 The fingerprint earns its two bytes: nothing pins a seed to the puzzle it produced, so if the
 generator ever changes, `brisk-otter-00` becomes a different grid. Without it the old state would

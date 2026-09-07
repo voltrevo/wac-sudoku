@@ -36,6 +36,44 @@ body{
 header{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
 #timer{font-variant-numeric:tabular-nums;color:var(--dim);font-size:14px}
+.hgroup{position:relative;display:flex;align-items:center;gap:8px}
+#menu{width:36px;height:32px;border:1px solid var(--keyb);border-radius:9px;background:var(--panel);
+  color:var(--ink);font-size:15px;line-height:1;cursor:pointer;padding:0}
+#menu[aria-expanded="true"]{background:var(--acc);border-color:var(--acc);color:#fff}
+.menu{position:absolute;top:38px;right:0;z-index:20;min-width:168px;padding:5px;
+  background:var(--panel);border:1px solid var(--keyb);border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:2px}
+.menu[hidden]{display:none}
+.menu button{padding:11px 12px;border:0;border-radius:9px;background:none;color:var(--ink);
+  font:inherit;font-size:15px;font-weight:600;text-align:left;cursor:pointer}
+.menu button:active,.menu button:hover{background:var(--peer)}
+
+/* ---- history ---- */
+.sheet{position:fixed;inset:0;z-index:30;background:var(--bg);display:flex;flex-direction:column;
+  padding:max(8px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom))}
+.sheet[hidden]{display:none}
+.sheethead{width:100%;max-width:460px;margin:0 auto;display:flex;align-items:center;
+  justify-content:space-between;padding:4px 0 10px}
+.sheethead h2{font-size:17px;margin:0;font-weight:650}
+.sheethead button{width:36px;height:32px;border:1px solid var(--keyb);border-radius:9px;
+  background:var(--panel);color:var(--ink);font-size:14px;cursor:pointer;padding:0}
+.sheetbody{width:100%;max-width:460px;margin:0 auto;flex:1;overflow-y:auto;
+  display:flex;flex-direction:column;gap:16px;padding-bottom:12px}
+.hsec h3{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);
+  margin:0 0 6px;font-weight:700}
+.hlist{display:flex;flex-direction:column;gap:6px}
+.hrow{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;text-align:left;
+  border:1px solid var(--keyb);border-radius:11px;background:var(--panel);color:var(--ink);
+  font:inherit;cursor:pointer}
+.hrow:active{background:var(--peer)}
+.hrow.here{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.hrow .txt{flex:1;min-width:0}
+.hrow .rseed{display:block;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow .rmeta{display:block;font-size:12.5px;color:var(--dim);margin-top:2px}
+.hrow .mark{font-size:15px;flex:0 0 auto}
+.hrow .mark.ok{color:var(--good)}
+.hempty{font-size:14px;color:var(--dim);padding:2px 2px 0}
 
 .seedbar{display:flex;gap:6px}
 .seedbar input{
@@ -125,7 +163,13 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
 <div class="wrap">
   <header>
     <h1>Killer Sudoku <span style="color:var(--dim);font-weight:400">6×6</span></h1>
-    <span id="timer">0:00</span>
+    <div class="hgroup">
+      <span id="timer">0:00</span>
+      <button id="menu" type="button" aria-label="Menu" aria-expanded="false" aria-haspopup="true">☰</button>
+      <nav class="menu" id="menupanel" hidden>
+        <button id="mhistory" type="button">🕘&nbsp; History</button>
+      </nav>
+    </div>
   </header>
 
   <div class="seedbar">
@@ -159,6 +203,14 @@ footer{font-size:11.5px;color:var(--dim);text-align:center;line-height:1.5}
   </div>
 
   <div class="msg" id="msg"></div>
+
+  <section class="sheet" id="history" hidden aria-labelledby="htitle">
+    <div class="sheethead">
+      <h2 id="htitle">History</h2>
+      <button id="hclose" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="sheetbody" id="hbody"></div>
+  </section>
   <footer>Every row, column and 3×2 box holds 1–6 once.<br>
     Dashed cages add to their corner number, no digit twice inside one.</footer>
 </div>
@@ -292,6 +344,9 @@ let cage = null, sums = null, solution = null;   // solution stays in here and i
 let val = null, notes = null, undoStack = [], batch = null, sel = -1,
     noteMode = false, revealed = false;
 let seedText = "", t0 = 0, ticking = false, elapsed = 0;
+/* Kept apart from `elapsed` because Clear resets the clock, and starting a solved puzzle over
+ * should not un-solve it in the history. Both are seconds; `solvedAt` is unix time. */
+let solvedAt = 0, solvedIn = 0;
 
 const cellEls = [];
 for (let i = 0; i < CELLS; i++){
@@ -375,8 +430,14 @@ function draw(){
   const full = val.every(v => v > 0);
   const won = full && bad.size === 0;
   $("board").classList.toggle("done", won);
-  if (won){ stop(); $("msg").className = "msg win";
-    $("msg").textContent = revealed ? "Solved — with the answer shown." : `Solved in ${clock()}. 🎉`; }
+  if (won){
+    stop();
+    // Revealing is not solving, so it does not stamp one. The first time stands: undoing back and
+    // finishing again does not rewrite when you did it.
+    if (!solvedAt && !revealed){ solvedAt = Math.floor(Date.now() / 1000); solvedIn = Math.floor(elapsed / 1000); }
+    $("msg").className = "msg win";
+    $("msg").textContent = revealed ? "Solved — with the answer shown." : `Solved in ${clock()}. 🎉`;
+  }
   else if (bad.size){ $("msg").className = "msg warn"; $("msg").textContent = "Something clashes."; }
   else { $("msg").className = "msg"; $("msg").textContent = full ? "" : ""; }
   save();
@@ -549,7 +610,7 @@ const maskOf = set => { let m = 0; for (const d of set) m |= 1 << (d - 1); retur
 function save(){
   if (!cage || !solution) return;
   const bytes = packState(solution, val, notes.map(maskOf),
-                          elapsed + (ticking ? Date.now() - t0 : 0), revealed);
+                          elapsed + (ticking ? Date.now() - t0 : 0), revealed, solvedAt, solvedIn);
   store.set(seedText, bytes);
   pending.set(seedText, bytes);
   writeSoon();
@@ -568,6 +629,8 @@ function load(){
   }
   elapsed = st[CELLS * 2] * 1000;
   revealed = !!st[CELLS * 2 + 1];
+  solvedAt = st[CELLS * 2 + 2];
+  solvedIn = st[CELLS * 2 + 3];
   return true;
 }
 
@@ -616,7 +679,7 @@ async function migrate(){
       const sol = Array.from(a.slice(1 + CELLS + a[0]));
       const masks = (o.n ?? []).map(list => maskOf(new Set(list)));
       while (masks.length < CELLS) masks.push(0);
-      const bytes = packState(sol, o.v, masks, o.e || 0, !!o.r);
+      const bytes = packState(sol, o.v, masks, o.e || 0, !!o.r, 0, 0);
       store.set(s, bytes);
       order = [s, ...order.filter(x => x !== s)];
       moved.push([s, bytes]);
@@ -644,6 +707,10 @@ async function migrate(){
 
 /* ------------------------------------------------------------- new puzzle */
 function build(text){
+  // The puzzle being left keeps its clock. `save()` only runs from `draw()`, so without this the
+  // time between the last thing you did and stepping away is lost — and the clock counts thinking.
+  if (cage && solution){ stop(); save(); }
+
   const typed = text.trim().toLowerCase().replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
   let { base, n } = splitSeed(typed);
   if (!base) base = todayName();          // "-07" on its own names no puzzle
@@ -660,6 +727,7 @@ function build(text){
   val = new Array(CELLS).fill(0);
   notes = Array.from({ length: CELLS }, () => new Set());
   undoStack = []; batch = null; sel = -1; revealed = false; elapsed = 0; ticking = false;
+  solvedAt = 0; solvedIn = 0;
   load();
   remember(seedText);
   $("cages").innerHTML = cageSvg(cage, sums);
@@ -687,6 +755,79 @@ function reveal(){
   draw();
 }
 
+/* --------------------------------------------------------------- history
+ * Everything a row shows lives in the state's header, so `summaryState` reads it out of the bytes
+ * without the answer — which is what makes this instant. Only the *digits* need the puzzle
+ * regenerated, and a list does not show digits.
+ */
+const clockText = s => s >= 3600
+  ? `${s / 3600 | 0}:${String((s / 60 | 0) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+  : `${s / 60 | 0}:${String(s % 60).padStart(2, "0")}`;
+
+function whenText(secs){
+  const then = secs * 1000, mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return new Date(then).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function rowsFor(){
+  const rows = [];
+  for (const seed of order){
+    const bytes = store.get(seed);
+    if (!bytes) continue;
+    const s = summaryState(bytes);
+    if (!s.length) continue;
+    rows.push({ seed, filled: s[1], noted: s[2], secs: s[3],
+                revealed: !!s[4], solved: !!s[5], at: s[6], took: s[7] });
+  }
+  return rows;
+}
+
+function rowHTML(r){
+  const meta = r.solved  ? `solved in ${clockText(r.took)} · ${whenText(r.at)}`
+             : r.revealed ? `answer shown · ${clockText(r.secs)} on the clock`
+             : `${r.filled} of 36 filled${r.noted ? `, ${r.noted} pencilled` : ""}`
+               + (r.secs ? ` · ${clockText(r.secs)}` : "");
+  const mark = r.solved ? '<span class="mark ok">✓</span>'
+             : r.revealed ? '<span class="mark">👁</span>' : "";
+  return `<button class="hrow${r.seed === seedText ? " here" : ""}" data-seed="${r.seed}">`
+       + `<span class="txt"><span class="rseed">${r.seed}</span>`
+       + `<span class="rmeta">${meta}</span></span>${mark}</button>`;
+}
+
+function section(title, list, empty){
+  return `<div class="hsec"><h3>${title}</h3>`
+       + (list.length ? `<div class="hlist">${list.map(rowHTML).join("")}</div>`
+                      : `<p class="hempty">${empty}</p>`)
+       + `</div>`;
+}
+
+function renderHistory(){
+  const rows = rowsFor();
+  const done = rows.filter(r => r.solved).sort((a, b) => b.at - a.at);
+  // Anything touched but not finished, newest first — `order` is already in that order.
+  const open = rows.filter(r => !r.solved && (r.filled || r.noted || r.revealed));
+  $("hbody").innerHTML =
+      section(`Completed${done.length ? ` (${done.length})` : ""}`, done,
+              "None yet. Finish one and it will show up here.")
+    + section("Recently edited", open, "Nothing in progress.");
+  for (const el of $("hbody").querySelectorAll(".hrow"))
+    el.addEventListener("click", () => { closeSheet(); build(el.dataset.seed); });
+}
+
+function openMenu(on){
+  $("menupanel").hidden = !on;
+  $("menu").setAttribute("aria-expanded", String(on));
+}
+function openSheet(){ renderHistory(); $("history").hidden = false; }
+function closeSheet(){ $("history").hidden = true; }
+
 /* ------------------------------------------------------------------ wiring */
 for (let d = 1; d <= N; d++){
   const b = document.createElement("button");
@@ -708,6 +849,10 @@ $("notes").addEventListener("click", () => {
 $("erase").addEventListener("click", erase);
 $("undo").addEventListener("click", undo);
 $("clear").addEventListener("click", clearAll);
+$("menu").addEventListener("click", e => { e.stopPropagation(); openMenu($("menupanel").hidden); });
+$("mhistory").addEventListener("click", () => { openMenu(false); openSheet(); });
+$("hclose").addEventListener("click", closeSheet);
+document.addEventListener("click", e => { if (!$("menupanel").hidden && !e.target.closest(".hgroup")) openMenu(false); });
 $("reveal").addEventListener("click", () => {
   if (revealed) return;
   $("confirm").classList.toggle("on");
@@ -717,6 +862,8 @@ $("cancel").addEventListener("click", () => $("confirm").classList.remove("on"))
 $("yes").addEventListener("click", reveal);
 
 addEventListener("keydown", e => {
+  if (e.key === "Escape"){ openMenu(false); closeSheet(); return; }
+  if (!$("history").hidden) return;          // the sheet is over the board; do not play through it
   if (e.target.tagName === "INPUT") return;
   if (e.key >= "1" && e.key <= "6"){ place(+e.key); e.preventDefault(); return; }
   if (e.key === "Backspace" || e.key === "Delete" || e.key === "0"){ erase(); e.preventDefault(); return; }

@@ -10,16 +10,39 @@
 //     3-7      which cells are filled            36 bits
 //     8-34     pencil marks, six bits per cell   216 bits
 //     35-37    seconds on the clock              24 bits
-//     38       flags — bit 0 is `revealed`
+//     38       flags — bit 0 `revealed`, bit 1 `solved`
 //     39       how many cells are wrong, W
-//     40..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
+//     40-43    solved at, unix seconds           32 bits, zero if it never was
+//     44-46    solved in, seconds on the clock   24 bits
+//     47..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
 //
-// Forty bytes and a little, against the 285 characters of JSON that said the same thing. The
-// caller never looks inside: `webgen.wac` hands this out as an opaque array and takes it back.
+// Fifty bytes and a little, against the 285 characters of JSON that said less. The caller never
+// looks inside: `webgen.wac` hands this out as an opaque array and takes it back.
+//
+// **When it was solved and how long it took are kept apart from the running clock**, because Clear
+// resets the clock and starting a solved puzzle over should not un-solve it in the history.
+//
+// Version 1 is still read. It had no completion fields and its wrong-list began at byte 40, so a
+// state saved before this is loaded rather than thrown away for being old.
 
 const i32 CELLS = 36;
-const i32 VERSION = 1;
-const i32 HEAD = 40;
+const i32 VERSION = 2;
+const i32 HEAD = 47;
+const i32 HEAD_V1 = 40;
+
+/** Where the wrong-list starts, which is the only thing the older layout moved. */
+i32 headFor(i32 version) {
+  if (version == 1) { return HEAD_V1; }
+  return HEAD;
+}
+
+void put24(u8[] b, i32 at, i32 v) {
+  b[at] = v & 0xff;
+  b[at + 1] = (v >>> 8) & 0xff;
+  b[at + 2] = (v >>> 16) & 0xff;
+}
+
+i32 get24(u8[] b, i32 at) { return b[at] | (b[at + 1] << 8) | (b[at + 2] << 16); }
 
 /**
  * Sixteen bits of the answer, so that a state saved against a *different* answer is thrown away
@@ -50,7 +73,8 @@ bool getBit(u8[] b, i32 from, i32 at) {
   return (b[from + at / 8] & (1 << (at % 8))) != 0;
 }
 
-export u8[] encode(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool revealed) {
+export u8[] encode(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool revealed,
+                   i32 solvedAt, i32 solvedIn) {
   i32 wrong = 0;
   for (i32 i = 0; i < CELLS; i++) { if (wrongAt(solution, val, i)) { wrong = wrong + 1; } }
 
@@ -68,12 +92,17 @@ export u8[] encode(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool r
   }
 
   // Seconds, not milliseconds: three bytes then hold 194 days, and nobody is timing to the tick.
-  i32 secs = elapsedMs / 1000;
-  b[35] = secs & 0xff;
-  b[36] = (secs >>> 8) & 0xff;
-  b[37] = (secs >>> 16) & 0xff;
-  b[38] = revealed ? 1 : 0;
+  put24(b, 35, elapsedMs / 1000);
+  i32 flags = 0;
+  if (revealed) { flags = flags | 1; }
+  if (solvedAt != 0) { flags = flags | 2; }
+  b[38] = flags;
   b[39] = wrong;
+  b[40] = solvedAt & 0xff;
+  b[41] = (solvedAt >>> 8) & 0xff;
+  b[42] = (solvedAt >>> 16) & 0xff;
+  b[43] = (solvedAt >>> 24) & 0xff;
+  put24(b, 44, solvedIn);
 
   i32 at = HEAD;
   for (i32 i = 0; i < CELLS; i++) {
@@ -91,19 +120,20 @@ export u8[] encode(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool r
  */
 export i32[] decode(i32[] solution, u8[] b) {
   i32[] none = i32[0]();
-  if (b.len() < HEAD) { return none; }
-  if (b[0] != VERSION) { return none; }
+  if (b.len() < HEAD_V1) { return none; }
+  if (b[0] != 1 && b[0] != VERSION) { return none; }
+  i32 head = headFor(b[0]);
   i32 fp = fingerprint(solution);
   if (b[1] != (fp & 0xff)) { return none; }
   if (b[2] != ((fp >>> 8) & 0xff)) { return none; }
   i32 wrong = b[39];
-  if (b.len() != HEAD + wrong) { return none; }
+  if (b.len() != head + wrong) { return none; }
 
-  i32[] out = i32[CELLS + CELLS + 2]();
+  i32[] out = i32[CELLS + CELLS + 4]();
   for (i32 i = 0; i < CELLS; i++) { if (getBit(b, 3, i)) { out[i] = solution[i]; } }
 
   for (i32 k = 0; k < wrong; k++) {
-    i32 code = b[HEAD + k];
+    i32 code = b[head + k];
     i32 cell = code / 6;
     if (cell >= CELLS) { return none; }
     out[cell] = code % 6 + 1;
@@ -115,7 +145,48 @@ export i32[] decode(i32[] solution, u8[] b) {
     out[CELLS + i] = m;
   }
 
-  out[CELLS + CELLS] = b[35] | (b[36] << 8) | (b[37] << 16);
-  out[CELLS + CELLS + 1] = b[38];
+  out[CELLS + CELLS] = get24(b, 35);
+  out[CELLS + CELLS + 1] = b[38] & 1;
+  if (b[0] == 1) { return out; }
+  out[CELLS + CELLS + 2] = b[40] | (b[41] << 8) | (b[42] << 16) | (b[43] << 24);
+  out[CELLS + CELLS + 3] = get24(b, 44);
+  return out;
+}
+
+/**
+ * What the history needs, without the answer.
+ *
+ * Every field here lives in the header, so this reads it straight out of the bytes — no solution,
+ * and so no regenerating a hundred puzzles to draw a list. Only the *digits* need the answer, and a
+ * list does not show digits.
+ *
+ * Returns `ok, filled, noted, seconds, revealed, solved, solvedAt, solvedIn`, or an empty array for
+ * bytes it cannot read.
+ */
+export i32[] summary(u8[] b) {
+  i32[] none = i32[0]();
+  if (b.len() < HEAD_V1) { return none; }
+  if (b[0] != 1 && b[0] != VERSION) { return none; }
+  if (b.len() != headFor(b[0]) + b[39]) { return none; }
+
+  i32 filled = 0;
+  for (i32 i = 0; i < CELLS; i++) { if (getBit(b, 3, i)) { filled = filled + 1; } }
+  i32 noted = 0;
+  for (i32 i = 0; i < CELLS; i++) {
+    for (i32 k = 0; k < 6; k++) {
+      if (getBit(b, 8, i * 6 + k)) { noted = noted + 1; k = 6; }
+    }
+  }
+
+  i32[] out = i32[8]();
+  out[0] = 1;
+  out[1] = filled;
+  out[2] = noted;
+  out[3] = get24(b, 35);
+  out[4] = b[38] & 1;
+  if (b[0] == 1) { return out; }
+  out[5] = (b[38] >>> 1) & 1;
+  out[6] = b[40] | (b[41] << 8) | (b[42] << 16) | (b[43] << 24);
+  out[7] = get24(b, 44);
   return out;
 }
