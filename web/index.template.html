@@ -599,7 +599,10 @@ addEventListener("hashchange", () => {
 addEventListener("pagehide", () => { stop(); save(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); } });
 
-build(decodeURIComponent(location.hash.slice(1)) || freshName());
+/* A link decides the puzzle; failing that, the one you were last on. `recent()` is ordered by
+ * `remember()`, which `build()` calls — so its head is the last puzzle actually opened, and the
+ * grid for it is still held. Only a browser that has never been here gets a new name. */
+build(decodeURIComponent(location.hash.slice(1)) || recent()[0] || freshName());
 </script>
 </body>
 </html>
