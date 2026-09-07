@@ -873,8 +873,12 @@ function findHint(){
 
   const marked = [...Array(CELLS).keys()].filter(i => noted[i]);
   if (marked.length){
+    // A shortlist does not count as the step that the marks are supposedly hiding: technique 11
+    // skips cells that already have marks, so ignoring them re-offers a shortlist for a cell that
+    // already holds exactly that one. Claiming a step exists on the strength of that stopped the
+    // hints dead in 34 of 60 runs from a blank grid.
     const ignoring = hunt(cand, cand, new Array(CELLS).fill(0));
-    if (ignoring && !ignoring.blocked)
+    if (ignoring && !ignoring.blocked && ignoring.kind !== "note")
       return { blocked: true, cells: marked,
         where: `Nothing follows while your pencil marks stand.`,
         why: `Taking them at their word, no step is available anywhere on the board. Ignore them` +
