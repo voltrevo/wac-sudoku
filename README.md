@@ -113,9 +113,14 @@ total pins down, a digit the cage cannot do without, a digit its cage locks onto
 poking a single cell out of one gives that cell away — then the same hunts again over what the cages
 have narrowed things to.
 
-Then the ones that need candidates in mind: **naked pairs and triples**, **hidden pairs**, and the
-21 rule where **two** cells poke out, which fixes what the pair adds to rather than naming a digit.
-Last of all, a shortlist for a cell that has none.
+**A hint will never use options you have not written down.** Telling you two blank cells "are 1 and
+4 in some order" hands over a real deduction for free and then reasons on top of it — the giveaway
+would be worth more than the hint riding on it. So the sharper techniques only appear once the cells
+involved carry your marks, and an elimination only ever rubs a digit out of a mark already on the
+board: **naked pairs and triples**, **hidden pairs**, and the 21 rule where **two** cells poke out,
+which fixes what the pair adds to rather than naming a digit.
+
+Last of all, a shortlist for a cell that has no marks — which is the way in.
 
 Cage reasoning enumerates whole assignments against each cell's candidates rather than bare subsets
 that add up, which is the difference between running out after two hints and finishing the puzzle.
@@ -132,13 +137,14 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-Over **300 blank grids**, hints only: **224 finish (75%)**, 76 give up, **0 finish on a wrong grid**,
-and all 76 stuck boards still have exactly one solution — so nothing a hint placed was ever wrong.
-From six correct digits in it is 30 of 30. A hint costs a few milliseconds.
+Over **300 blank grids**, hints only: **150 finish (50%)**, 150 give up, **0 finish on a wrong
+grid**, and all 150 stuck boards still have exactly one solution — so nothing a hint placed was ever
+wrong. From six correct digits in it is 30 of 30. A hint costs a few milliseconds.
 
-Every technique above is exhausted on those 76: not one has a naked pair, a hidden pair, a triple or
-a two-cell region sum left in it. **All 76 need assuming a digit and watching it fail**, which is
-where the ladder deliberately stops — that is the puzzle, not a gap in the hints.
+A blank grid is the worst case for the ladder by design, since nothing is pencilled and the
+eliminations have nowhere to land. Letting them run on cells the player had not marked took that
+figure to 75%, and the extra 25% was bought by giving deductions away — which is not what a hint is
+for.
 
 ### Checking your progress
 
