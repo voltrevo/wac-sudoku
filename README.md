@@ -116,7 +116,9 @@ The cheap end is a cage down to its last cell, a small cage's total naming the o
 a cell only one digit fits, and a mark the grid has already ruled out. Then a digit with one home
 left in a row, column or box, region arithmetic, and the cage-combination arguments. Then **a digit
 the cage must hold whose every possible home one outside cell can see** — locked candidates, without
-the usual requirement that the homes line up on a row.
+the usual requirement that the homes line up on a row — and the three that corner a digit the other
+way round: every 4 a box can take sitting on one row (**pointing**), every 4 a row can take sitting
+in one box (**claiming**), or every 4 a house can take belonging to one cage.
 
 Then **region arithmetic**. Any one, two or three whole rows, columns or boxes hold 21 each.
 Subtract the cages lying wholly inside and what remains is a set of cells whose total is known; add
@@ -151,18 +153,19 @@ The sharpest test of that is to hint a **blank** grid to a standstill, because t
 the board came from a hint — so an unsound step shows up as a finished grid that is simply wrong.
 Driving 30 puzzles that way, hints only:
 
-Over **300 blank grids**, hints only: **263 finish (88%)**, 37 give up, **0 finish on a wrong
-grid**, and all 37 stuck boards still have exactly one solution — so nothing a hint placed was ever
+Over **300 blank grids**, hints only: **277 finish (92%)**, 23 give up, **0 finish on a wrong
+grid**, and all 23 stuck boards still have exactly one solution — so nothing a hint placed was ever
 wrong. From four correct digits in it is 30 of 30. A hint costs a fraction of a millisecond.
 
 Over 40 blank grids hinted to a stop, the mix bears the ranking out: cage shortlists 23%, naked
 singles 18%, cages down to their last cell 15%, stale marks 10%, hidden singles 9% — and the
 two-step arguments that used to dominate now account for under 1%.
 
-The 37 stall at the opening — 32.5 of 36 cells still empty, 72% of those already pencilled. A quad
-would help exactly one of them. All 37 have a one-cell contradiction available; whether some of
-those restate as direct arguments the way locked candidates did is untested, and assuming they do
-not has already been wrong twice.
+The 23 stall at the opening, and not for want of pencilling: every cell they can say anything about
+is marked exactly as tightly as the grid and cages allow, and every unmarked cell still has all six
+digits open. Pointing, claiming, house-to-cage and the region arithmetic are all exhausted on them;
+a quad helps one, an X-wing one. What the other 21 need has not been identified, and calling it case
+analysis has already been wrong twice.
 
 A blank grid is the worst case by design, since nothing is pencilled and the eliminations have
 nowhere to land. Letting them run on cells the player had *not* marked would reach 75%, but that

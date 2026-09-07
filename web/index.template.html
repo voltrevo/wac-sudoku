@@ -692,6 +692,9 @@ const COST = {
   markVsCage:    36,
   cageMust:      38,
   regionCut:     44,   // the same arithmetic, more than one cell over
+  pointing:      44,   // every 4 this box can take is on one row
+  claiming:      46,
+  houseToCage:   48,
   seesAllHomes:  50,
   nakedPair:     56,
   hiddenPair:    62,
@@ -946,8 +949,16 @@ function hunt(cand, pool, noted){
    * Reading `tight` rather than the marks directly is safe here: any mark the grid or a cage has
    * already ruled out is caught further up, so by this point they agree on every marked cell.
    */
-  const strike = (victim, d, cells, where, why) =>
-    (noted[victim] & BIT(d)) ? { kind: "unnote", cell: victim, digit: d, cells, where, why } : null;
+  const ALL = (1 << (N + 1)) - 2;
+  const strike = (victim, d, cells, where, why) => {
+    if (noted[victim] & BIT(d)) return { kind: "unnote", cell: victim, digit: d, cells, where, why };
+    /* A cell nobody has written on, with all six still open, can take the elimination as a
+     * shortlist instead: "everything but d" states the conclusion and not a word more. Any
+     * narrower and writing what is left would smuggle in the narrowing too. */
+    if (!noted[victim] && tight[victim] === ALL)
+      return { kind: "note", cell: victim, digits: ALL & ~BIT(d), cells, where, why };
+    return null;
+  };
   const strikeAny = (victims, d, cells, where, why) => {
     for (const v of victims){ const h = strike(v, d, cells, where, why); if (h) return h; }
     return null;
@@ -1022,6 +1033,73 @@ function hunt(cand, pool, noted){
   }
 
   regionCuts: {
+  /* 12b. Where a digit is cornered.
+   *
+   *     Three directions, all the same argument: if every cell of one group that can still take a
+   *     digit also lies inside another group, then that digit belongs to the overlap — and the
+   *     rest of the second group cannot have it. Box into a line, line into a box, house into a
+   *     cage. These say where a digit can live, not what any one cell's options are, so they read
+   *     the candidates the way the hidden-single hint already does.
+   */
+  cornered: {
+    const homesIn = (cells, d) => cells.filter(i => !shown(i) && (tight[i] & BIT(d)));
+
+    for (let g = 0; g < N; g++){
+      for (let d = 1; d <= N; d++){
+        if (BOXES[g].some(i => shown(i) === d)) continue;
+        const sp = homesIn(BOXES[g], d);
+        if (sp.length < 2) continue;
+        for (const [pick, band, label] of [[i => i / N | 0, ROWS, "row"], [i => i % N, COLS, "column"]]){
+          const l = pick(sp[0]);
+          if (!sp.every(i => pick(i) === l)) continue;
+          const hit = strikeAny(band[l].filter(i => !shown(i) && boxOf(i) !== g && (tight[i] & BIT(d))),
+            d, [...BOXES[g], ...band[l]],
+            `Look at ${BOX_NAMES[g]}, and at ${label} ${l + 1}.`,
+            `Every cell in that box that can still take a ${d} sits on ${label} ${l + 1}. So the` +
+            ` box's ${d} is somewhere along it — which uses up that ${label}'s ${d}, and leaves` +
+            ` none for its cells outside the box.`);
+          if (hit){ offer(COST.pointing, hit); break cornered; }
+        }
+      }
+    }
+
+    for (const [band, label] of [[ROWS, "row"], [COLS, "column"]]){
+      for (let l = 0; l < N; l++){
+        for (let d = 1; d <= N; d++){
+          if (band[l].some(i => shown(i) === d)) continue;
+          const sp = homesIn(band[l], d);
+          if (sp.length < 2) continue;
+          const g = boxOf(sp[0]);
+          if (!sp.every(i => boxOf(i) === g)) continue;
+          const hit = strikeAny(BOXES[g].filter(i => !shown(i) && !band[l].includes(i) && (tight[i] & BIT(d))),
+            d, [...band[l], ...BOXES[g]],
+            `Look at ${label} ${l + 1}, and at ${BOX_NAMES[g]}.`,
+            `Every cell on that ${label} that can still take a ${d} is inside the box. So the` +
+            ` ${label}'s ${d} is one of them — which is the box's ${d} too, and the rest of the box` +
+            ` cannot have one.`);
+          if (hit){ offer(COST.claiming, hit); break cornered; }
+        }
+      }
+    }
+
+    for (const h of REGIONS){
+      for (let d = 1; d <= N; d++){
+        if (h.cells.some(i => shown(i) === d)) continue;
+        const sp = homesIn(h.cells, d);
+        if (sp.length < 2) continue;
+        const k = cage[sp[0]];
+        if (!sp.every(i => cage[i] === k)) continue;
+        const hit = strikeAny(cageMembers[k].filter(i => !shown(i) && !h.cells.includes(i) && (tight[i] & BIT(d))),
+          d, [...h.cells, ...cageMembers[k]],
+          `Look at ${h.name}, and at the cage totalling ${sums[k]}.`,
+          `Every cell in ${h.name} that can still take a ${d} belongs to that cage. So the cage is` +
+          ` where ${h.name}'s ${d} goes — and the cage cannot hold a second one, so its cells` +
+          ` outside ${h.name} are not ${d}.`);
+        if (hit){ offer(COST.houseToCage, hit); break cornered; }
+      }
+    }
+  }
+
   /* 13. The same arithmetic where more than one cell is left over. That does not name a digit,
    *     but knowing what a handful of cells add to still rules plenty out — and since it reads
    *     their options, every one of them has to be pencilled.
