@@ -1,0 +1,121 @@
+// What a player has done to one puzzle, as bytes.
+//
+// **The answer is not stored, so most of the state costs one bit.** The seed regenerates the
+// solution, so a cell filled in *correctly* needs only the fact that it is filled. Only the cells
+// the player has got wrong carry a digit, and in a grid being solved rather than guessed at there
+// are usually none. What is left is two bit vectors and a short list:
+//
+//     0        version
+//     1-2      a fingerprint of the answer this state was saved against
+//     3-7      which cells are filled            36 bits
+//     8-34     pencil marks, six bits per cell   216 bits
+//     35-37    seconds on the clock              24 bits
+//     38       flags — bit 0 is `revealed`
+//     39       how many cells are wrong, W
+//     40..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
+//
+// Forty bytes and a little, against the 285 characters of JSON that said the same thing. The
+// caller never looks inside: `webgen.wac` hands this out as an opaque array and takes it back.
+
+const i32 CELLS = 36;
+const i32 VERSION = 1;
+const i32 HEAD = 40;
+
+/**
+ * Sixteen bits of the answer, so that a state saved against a *different* answer is thrown away
+ * rather than silently rewritten. Nothing pins a seed to the puzzle it produced — change the
+ * generator and `brisk-otter-00` is a new grid, and without this the old state would decode
+ * against it and quietly move the player's digits around.
+ */
+i32 fingerprint(i32[] solution) {
+  i32 h = 0x9dc5;
+  for (i32 i = 0; i < solution.len(); i++) {
+    h = (h ^ solution[i]) & 0xffff;
+    h = (h * 0x0193) & 0xffff;
+  }
+  return h;
+}
+
+bool wrongAt(i32[] solution, i32[] val, i32 i) {
+  return val[i] != 0 && val[i] != solution[i];
+}
+
+/** Set bit `at` of the vector starting at byte `from`. */
+void setBit(u8[] b, i32 from, i32 at) {
+  i32 idx = from + at / 8;
+  b[idx] = b[idx] | (1 << (at % 8));
+}
+
+bool getBit(u8[] b, i32 from, i32 at) {
+  return (b[from + at / 8] & (1 << (at % 8))) != 0;
+}
+
+export u8[] encode(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool revealed) {
+  i32 wrong = 0;
+  for (i32 i = 0; i < CELLS; i++) { if (wrongAt(solution, val, i)) { wrong = wrong + 1; } }
+
+  u8[] b = u8[HEAD + wrong]();
+  b[0] = VERSION;
+  i32 fp = fingerprint(solution);
+  b[1] = fp & 0xff;
+  b[2] = (fp >>> 8) & 0xff;
+
+  for (i32 i = 0; i < CELLS; i++) { if (val[i] != 0) { setBit(b, 3, i); } }
+
+  for (i32 i = 0; i < CELLS; i++) {
+    i32 m = notes[i];
+    for (i32 k = 0; k < 6; k++) { if ((m & (1 << k)) != 0) { setBit(b, 8, i * 6 + k); } }
+  }
+
+  // Seconds, not milliseconds: three bytes then hold 194 days, and nobody is timing to the tick.
+  i32 secs = elapsedMs / 1000;
+  b[35] = secs & 0xff;
+  b[36] = (secs >>> 8) & 0xff;
+  b[37] = (secs >>> 16) & 0xff;
+  b[38] = revealed ? 1 : 0;
+  b[39] = wrong;
+
+  i32 at = HEAD;
+  for (i32 i = 0; i < CELLS; i++) {
+    if (wrongAt(solution, val, i)) { b[at] = i * 6 + val[i] - 1; at = at + 1; }
+  }
+  return b;
+}
+
+/**
+ * The state back, as `36` digits, `36` note masks, seconds, then `revealed`. An empty array means
+ * the bytes were not usable — a version this build does not know, a length that does not match its
+ * own header, or an answer that is not the one they were saved against. The caller reads that as
+ * "no saved state" and starts the puzzle clean, which is the only safe reading of a blob whose
+ * meaning cannot be established.
+ */
+export i32[] decode(i32[] solution, u8[] b) {
+  i32[] none = i32[0]();
+  if (b.len() < HEAD) { return none; }
+  if (b[0] != VERSION) { return none; }
+  i32 fp = fingerprint(solution);
+  if (b[1] != (fp & 0xff)) { return none; }
+  if (b[2] != ((fp >>> 8) & 0xff)) { return none; }
+  i32 wrong = b[39];
+  if (b.len() != HEAD + wrong) { return none; }
+
+  i32[] out = i32[CELLS + CELLS + 2]();
+  for (i32 i = 0; i < CELLS; i++) { if (getBit(b, 3, i)) { out[i] = solution[i]; } }
+
+  for (i32 k = 0; k < wrong; k++) {
+    i32 code = b[HEAD + k];
+    i32 cell = code / 6;
+    if (cell >= CELLS) { return none; }
+    out[cell] = code % 6 + 1;
+  }
+
+  for (i32 i = 0; i < CELLS; i++) {
+    i32 m = 0;
+    for (i32 k = 0; k < 6; k++) { if (getBit(b, 8, i * 6 + k)) { m = m | (1 << k); } }
+    out[CELLS + i] = m;
+  }
+
+  out[CELLS + CELLS] = b[35] | (b[36] << 8) | (b[37] << 16);
+  out[CELLS + CELLS + 1] = b[38];
+  return out;
+}

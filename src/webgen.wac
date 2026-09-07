@@ -14,6 +14,7 @@
 // inspection, then merge touching cages while a merge keeps the puzzle unique.
 
 import { runSolve, Solver } from "./solve.wac";
+import { encode, decode } from "./state.wac";
 
 /** xorshift32 — small, seedable, and enough for shuffling. */
 struct Rng {
@@ -258,4 +259,15 @@ export i32[] generate(i32 seed) {
   for (i32 k = 0; k < best.nCages; k++) { out[1 + cells + k] = best.sums[k]; }
   for (i32 i = 0; i < cells; i++) { out[1 + cells + best.nCages + i] = best.grid[i]; }
   return out;
+}
+
+/* The saved grid crosses as bytes the page never looks inside. Wrappers rather than a re-export
+ * because wac has none, and `bindgen` binds what the entry file exports. */
+
+export u8[] packState(i32[] solution, i32[] val, i32[] notes, i32 elapsedMs, bool revealed) {
+  return encode(solution, val, notes, elapsedMs, revealed);
+}
+
+export i32[] unpackState(i32[] solution, u8[] blob) {
+  return decode(solution, blob);
 }

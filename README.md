@@ -2,7 +2,7 @@
 
 A killer sudoku generator, solver and player, written in [wac](https://github.com/voltrevo/wac).
 
-The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 43 KB,
+The generator compiles to WebAssembly and the whole app ships as **one HTML file** — around 51 KB,
 with the wasm module inlined as base64. No CDN, no fetches, no service worker, nothing to install.
 Type a seed, get a puzzle, solve it on your phone.
 
@@ -37,9 +37,10 @@ that name at `-00`, so **Next** and **Prev** always have somewhere to go. They w
 wrap, which is why Prev from `-00` lands on `-99` rather than refusing — a hundred puzzles per
 name, in a ring.
 
-**Ten puzzles are kept, not just the one on screen**, because Next and Prev make leaving a puzzle
-mid-thought the normal way to use this: step forward, get stuck, step back, and your grid is where
-you left it. The eleventh evicts the least recently opened.
+**A hundred puzzles are kept, not just the one on screen**, because Next and Prev make leaving a
+puzzle mid-thought the normal way to use this: step forward, get stuck, step back, and your grid is
+where you left it. A hundred is one full `-00`…`-99` ring, so Next can lap a name without losing
+anything; the next one evicts the least recently opened.
 
 Tap a cell, tap a digit. Notes mode writes pencil marks, which clear themselves from a cell's row,
 column, box and cage peers when you commit a digit. One action is one undo however many cells it
@@ -67,6 +68,7 @@ src/gen.wac         the same generator as a command line, for batches
 src/solve.wac       the solver both of those are built on
 src/killer.wac      reads a puzzle, solves it, or works out its cages from the printed totals
 src/render.wac      a printable HTML sheet of many puzzles
+src/state.wac       what you have done to a grid, as bytes
 src/text.wac        small shared helpers
 
 web/index.template.html   the app, with one marker where the wasm glue is folded in
@@ -76,6 +78,43 @@ tools/verify.mjs          an independent solver that checks the generator's clai
 bootstrap.sh        build everything, fetching a wac compiler if there is not one here
 wac-ref.txt         which wac to build with — a branch, tag or commit
 ```
+
+## Saving
+
+A saved grid is **forty-odd bytes**, and the page never looks inside it: `packState` in wac returns
+an opaque `Uint8Array` and `unpackState` takes it back. The layout is `src/state.wac`'s business.
+
+It is small because **the answer is not in it**. The seed regenerates the solution, so a cell
+filled in correctly costs one bit — *filled* — and only the cells you have got wrong carry a digit.
+What remains is two bit vectors and a short list:
+
+```
+0        version
+1-2      a fingerprint of the answer this state was saved against
+3-7      which cells are filled            36 bits
+8-34     pencil marks, six bits per cell   216 bits
+35-37    seconds on the clock              24 bits
+38       flags — bit 0 is `revealed`
+39       how many cells are wrong, W
+40..     one byte each: cell * 6 + digit - 1, which fits because 36 * 6 = 216 < 256
+```
+
+Forty bytes covers every realistic state, including a grid pencilled in every cell with all six
+candidates — which the JSON this replaced spent 611 characters on. A hundred puzzles is 4 KB.
+
+The fingerprint earns its two bytes: nothing pins a seed to the puzzle it produced, so if the
+generator ever changes, `brisk-otter-00` becomes a different grid. Without it the old state would
+decode against the new answer and quietly move your digits around. A mismatch is read as "no saved
+state" instead.
+
+Storage is **IndexedDB**, which keeps a byte array as bytes rather than stringifying it — and
+`github.io` is a single origin for every project published under it, so the localStorage budget was
+never ours alone. Everything is mirrored in memory at startup, so reads are synchronous and only
+writes go to disk, coalesced. Anything the localStorage version left behind is migrated once, then
+removed.
+
+**Undo is not saved and is not meant to be.** It lives in memory for one puzzle: `build()` resets it
+on every switch, so it never outlives the grid it describes.
 
 ## How a puzzle is made unique
 

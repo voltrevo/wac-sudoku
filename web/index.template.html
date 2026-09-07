@@ -465,45 +465,141 @@ setInterval(() => {
 }, 500);
 
 /* ----------------------------------------------------------- persistence
- * Ten puzzles are kept, not just the one on screen, because Next and Prev make leaving a puzzle
- * mid-thought the normal way to use this. Step forward, get stuck, step back — your grid is where
- * you left it. `ks6:recent` is the order they were last opened in; the eleventh evicts the oldest,
- * and its entry is removed rather than left behind for nobody to read. */
-const KEEP = 10;
-const INDEX = "ks6:recent";
-const key = (s = seedText) => "ks6:" + s;
+ * **The grid is bytes this side never looks inside.** `packState` in wac turns it into forty-odd
+ * bytes and `unpackState` turns them back; the shape of that blob is the compiler's business, not
+ * the page's. It is small because the answer is not in it — a cell filled in correctly costs one
+ * bit, and only mistakes carry a digit.
+ *
+ * IndexedDB rather than localStorage. It stores a `Uint8Array` as bytes instead of stringifying
+ * it, and `github.io` is a single origin for every project published under it, so the localStorage
+ * budget was never ours alone.
+ *
+ * Everything is mirrored in memory at startup — a hundred puzzles is about four kilobytes — so
+ * reads stay synchronous and only writes go to disk, coalesced. A hundred is one full `-00`..`-99`
+ * ring, so Next can lap a name without losing anything.
+ */
+const DB_NAME = "wac-sudoku", DB_VERSION = 1, KEEP = 100;
+const PUZZLES = "puzzles", META = "meta";
 
-function recent(){
-  try { const r = JSON.parse(localStorage.getItem(INDEX)); return Array.isArray(r) ? r : []; }
-  catch (e) { return []; }
+let db = null;
+let store = new Map();          // seed -> Uint8Array
+let order = [];                 // most recently opened first
+const pending = new Map();      // seed -> Uint8Array, or null to delete
+let flushTimer = 0;
+
+const recent = () => order;
+const done = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+function openDB(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VERSION);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains(PUZZLES)) d.createObjectStore(PUZZLES);
+      if (!d.objectStoreNames.contains(META)) d.createObjectStore(META);
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error("blocked"));
+  });
 }
-function remember(s){
+
+async function openStore(){
+  db = await openDB();
+  const tx = db.transaction([PUZZLES, META], "readonly");
+  const [keys, vals, saved] = await Promise.all([
+    done(tx.objectStore(PUZZLES).getAllKeys()),
+    done(tx.objectStore(PUZZLES).getAll()),
+    done(tx.objectStore(META).get("order")),
+  ]);
+  keys.forEach((k, i) => store.set(k, vals[i]));
+  // The stored order is advisory: anything it names that is gone is dropped, anything it misses is
+  // appended, so a half-written flush costs recency rather than a puzzle.
+  const known = Array.isArray(saved) ? saved.filter(k => store.has(k)) : [];
+  order = [...known, ...keys.filter(k => !known.includes(k))];
+}
+
+/* Writes are coalesced: `draw()` runs on every keystroke and each one would otherwise be its own
+ * transaction. Losing the last few hundred milliseconds on a crash costs one digit. */
+function writeSoon(){
+  if (flushTimer) return;
+  flushTimer = setTimeout(flush, 300);
+}
+function flush(){
+  flushTimer = 0;
+  if (!db){ pending.clear(); return; }
   try {
-    const list = [s, ...recent().filter(x => x !== s)];
-    for (const gone of list.slice(KEEP)) localStorage.removeItem(key(gone));
-    localStorage.setItem(INDEX, JSON.stringify(list.slice(0, KEEP)));
-  } catch (e) { /* see save() */ }
+    const tx = db.transaction([PUZZLES, META], "readwrite");
+    const ps = tx.objectStore(PUZZLES);
+    for (const [k, v] of pending) v === null ? ps.delete(k) : ps.put(v, k);
+    tx.objectStore(META).put(order.slice(), "order");
+    pending.clear();
+  } catch (e) { pending.clear(); /* storage went away; the session still plays */ }
 }
+
+function remember(s){
+  order = [s, ...order.filter(x => x !== s)];
+  for (const gone of order.slice(KEEP)){ store.delete(gone); pending.set(gone, null); }
+  order = order.slice(0, KEEP);
+  writeSoon();
+}
+
+const maskOf = set => { let m = 0; for (const d of set) m |= 1 << (d - 1); return m; };
 
 function save(){
-  if (!cage) return;
-  try {
-    localStorage.setItem(key(), JSON.stringify({
-      v: Array.from(val), n: notes.map(s => Array.from(s)),
-      e: elapsed + (ticking ? Date.now() - t0 : 0), r: revealed,
-    }));
-  } catch (e) { /* private mode; the puzzle still works, it just will not come back */ }
+  if (!cage || !solution) return;
+  const bytes = packState(solution, val, notes.map(maskOf),
+                          elapsed + (ticking ? Date.now() - t0 : 0), revealed);
+  store.set(seedText, bytes);
+  pending.set(seedText, bytes);
+  writeSoon();
 }
+
 function load(){
+  const bytes = store.get(seedText);
+  if (!bytes) return false;
+  const st = unpackState(solution, bytes);
+  if (!st.length) return false;      // a version we do not know, or a state saved against another answer
+  for (let i = 0; i < CELLS; i++) val[i] = st[i];
+  for (let i = 0; i < CELLS; i++){
+    const m = st[CELLS + i];
+    notes[i] = new Set();
+    for (let d = 1; d <= N; d++) if (m & (1 << (d - 1))) notes[i].add(d);
+  }
+  elapsed = st[CELLS * 2] * 1000;
+  revealed = !!st[CELLS * 2 + 1];
+  return true;
+}
+
+/* One-time move of anything the localStorage version left behind. Re-encoding needs each puzzle's
+ * answer, so this regenerates them — about 2ms each, once, for at most ten. */
+function migrate(){
+  let seeds;
   try {
-    const raw = localStorage.getItem(key());
-    if (!raw) return false;
-    const o = JSON.parse(raw);
-    if (!Array.isArray(o.v) || o.v.length !== CELLS) return false;
-    val = o.v.slice(); notes = o.n.map(a => new Set(a));
-    elapsed = o.e || 0; revealed = !!o.r;
-    return true;
-  } catch (e) { return false; }
+    const raw = localStorage.getItem("ks6:recent");
+    if (!raw) return;
+    seeds = JSON.parse(raw);
+    if (!Array.isArray(seeds)) return;
+  } catch (e) { return; }
+  for (const s of seeds.slice().reverse()){          // oldest first, so the order comes out right
+    try {
+      const o = JSON.parse(localStorage.getItem("ks6:" + s));
+      if (!o || !Array.isArray(o.v) || o.v.length !== CELLS) continue;
+      const a = generate(hash(s));
+      const sol = Array.from(a.slice(1 + CELLS + a[0]));
+      const masks = (o.n ?? []).map(list => maskOf(new Set(list)));
+      while (masks.length < CELLS) masks.push(0);
+      const bytes = packState(sol, o.v, masks, o.e || 0, !!o.r);
+      store.set(s, bytes);
+      pending.set(s, bytes);
+      order = [s, ...order.filter(x => x !== s)];
+    } catch (e) { /* one unreadable entry should not stop the rest */ }
+  }
+  try {
+    for (const s of seeds) localStorage.removeItem("ks6:" + s);
+    localStorage.removeItem("ks6:recent");
+  } catch (e) { /* nothing to be done */ }
+  writeSoon();
 }
 
 /* ------------------------------------------------------------- new puzzle */
@@ -604,12 +700,15 @@ addEventListener("hashchange", () => {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h && h !== seedText) build(h);
 });
-addEventListener("pagehide", () => { stop(); save(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); } });
+// Both also flush: a coalesced write must not be the one still waiting when the tab goes away.
+addEventListener("pagehide", () => { stop(); save(); flush(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden){ stop(); save(); flush(); } });
 
 /* A link decides the puzzle; failing that, the one you were last on. `recent()` is ordered by
  * `remember()`, which `build()` calls — so its head is the last puzzle actually opened, and the
  * grid for it is still held. Only a browser that has never been here gets a new name. */
+try { await openStore(); migrate(); }
+catch (e) { /* no IndexedDB — private mode, or it is disabled. Play; do not persist. */ }
 build(decodeURIComponent(location.hash.slice(1)) || recent()[0] || todayName());
 </script>
 </body>
